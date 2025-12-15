@@ -12,8 +12,8 @@ namespace Ozone
         /// <summary>
         /// Searches child element of the current element.
         /// </summary>
-        public static FlowStep RelativeFind(string selector, int index = 0) =>
-            context =>
+        public static Func<Context, Task<Context>> RelativeFind(string selector, int index = 0) =>
+            async context =>
             {
                 if (context.Element == null)
                 {
@@ -21,7 +21,7 @@ namespace Ozone
                 }
 
                 var locator = context.Element.Locator(selector);
-                int count = Sync.Run(() => locator.CountAsync());
+                int count = await locator.CountAsync();
 
                 if (count <= 0)
                 {
@@ -40,8 +40,8 @@ namespace Ozone
         /// <summary>
         /// Searches all child elements of the current element.
         /// </summary>
-        public static FlowStep RelativeFindAll(string selector) =>
-            context =>
+        public static Func<Context, Task<Context>> RelativeFindAll(string selector) =>
+            async context =>
             {
                 if (context.Element == null)
                 {
@@ -49,7 +49,7 @@ namespace Ozone
                 }
 
                 var locator = context.Element.Locator(selector);
-                int count = Sync.Run(() => locator.CountAsync());
+                int count = await locator.CountAsync();
 
                 if (count <= 0)
                 {
@@ -67,8 +67,8 @@ namespace Ozone
         /// <summary>
         /// Searches child element of the current element using XPath.
         /// </summary>
-        public static FlowStep RelativeFindOnXPath(string xpath, int index = 0) =>
-            context =>
+        public static Func<Context, Task<Context>> RelativeFindOnXPath(string xpath, int index = 0) =>
+            async context =>
             {
                 if (context.Element == null)
                 {
@@ -76,7 +76,7 @@ namespace Ozone
                 }
 
                 var locator = context.Element.Locator($"xpath={xpath}");
-                int count = Sync.Run(() => locator.CountAsync());
+                int count = await locator.CountAsync();
 
                 if (count <= 0)
                 {
@@ -95,8 +95,8 @@ namespace Ozone
         /// <summary>
         /// Searches all child elements of the current element using XPath.
         /// </summary>
-        public static FlowStep RelativeFindAllOnXPath(string xpath) =>
-            context =>
+        public static Func<Context, Task<Context>> RelativeFindAllOnXPath(string xpath) =>
+            async context =>
             {
                 if (context.Element == null)
                 {
@@ -104,7 +104,7 @@ namespace Ozone
                 }
 
                 var locator = context.Element.Locator($"xpath={xpath}");
-                int count = Sync.Run(() => locator.CountAsync());
+                int count = await locator.CountAsync();
 
                 if (count <= 0)
                 {

@@ -14,40 +14,43 @@ namespace Ozone
         /// <summary>
         /// Find element by CSS selector from page/frame.
         /// </summary>
-        public static FlowStep Find(string selector, int index = 0)
-        {
-            if (context.Page == null)
+        public static Func<Context, Task<Context>> Find(string selector, int index = 0) =>
+            async context =>
             {
-                return context.CreateProblem($"{nameof(Find)}: Missing Page");
-            }
+                if (context.Page == null)
+                {
+                    return context.CreateProblem($"{nameof(Find)}: Missing Page");
+                }
 
-            var locator = context.RootLocatorForSelector(selector);
-            int count = Sync.Run(() => locator.CountAsync());
+                var locator = context.RootLocatorForSelector(selector);
 
-            if (count <= 0)
-            {
-                return context.CreateProblem($"{nameof(Find)}: '{selector}' not found");
-            }
+                int count = await locator.CountAsync();
 
-            int idx = index < 0 ? count - 1 : index;
-            if (idx < 0 || idx >= count)
-            {
-                return context.CreateProblem($"{nameof(Find)}: index {index} out of range (0..{count - 1})");
-            }
+                if (count == 0)
+                {
+                    return context.CreateProblem($"{nameof(Find)}: '{selector}' not found");
+                }
 
-            return context.NextElement(locator.Nth(idx));
-        }
+                int idx = index < 0 ? count - 1 : index;
+
+                if (idx < 0 || idx >= count)
+                {
+                    return context.CreateProblem($"{nameof(Find)}: index {index} out of range (0..{count - 1})");
+                }
+
+                return context.NextElement(locator.Nth(idx));
+            };
 
         /// <summary>
         /// Find last element by selector.
         /// </summary>
-        public static FlowStep FindLast(string selector) => Find(selector, -1);
+        public static Func<Context, Task<Context>> FindLast(string selector) => Find(selector, -1);
 
         /// <summary>
         /// Find all elements by CSS selector.
         /// </summary>
-        public static FlowStep FindAll(string selector) =>
-            context =>
+        public static Func<Context, Task<Context>> FindAll(string selector) =>
+            async context =>
             {
                 if (context.Page == null)
                 {
@@ -55,7 +58,7 @@ namespace Ozone
                 }
 
                 var locator = context.RootLocatorForSelector(selector);
-                int count = Sync.Run(() => locator.CountAsync());
+                int count = await locator.CountAsync();
 
                 if (count <= 0)
                 {
@@ -73,8 +76,8 @@ namespace Ozone
         /// <summary>
         /// Find element by XPath from page/frame.
         /// </summary>
-        public static FlowStep FindOnXPath(string xpath, int index = 0) =>
-            context =>
+        public static Func<Context, Task<Context>> FindOnXPath(string xpath, int index = 0) =>
+            async context =>
             {
                 if (context.Page == null)
                 {
@@ -82,7 +85,7 @@ namespace Ozone
                 }
 
                 var locator = context.RootLocatorForXPath(xpath);
-                int count = Sync.Run(() => locator.CountAsync());
+                int count = await locator.CountAsync();
 
                 if (count <= 0)
                 {
@@ -101,8 +104,8 @@ namespace Ozone
         /// <summary>
         /// Find all elements by XPath from page/frame.
         /// </summary>
-        public static FlowStep FindAllOnXPath(string xpath) =>
-            context =>
+        public static Func<Context, Task<Context>> FindAllOnXPath(string xpath) =>
+            async context =>
             {
                 if (context.Page == null)
                 {
@@ -110,7 +113,7 @@ namespace Ozone
                 }
 
                 var locator = context.RootLocatorForXPath(xpath);
-                int count = Sync.Run(() => locator.CountAsync());
+                int count = await locator.CountAsync();
 
                 if (count <= 0)
                 {
@@ -128,16 +131,16 @@ namespace Ozone
         /// <summary>
         /// Check for existence of an element using CSS selector.
         /// </summary>
-        public static bool Exists(Context context, string selector, float timeoutSeconds = 1.0f)
+        public async static Task<bool> Exists(Context context, string selector, float timeoutSeconds = 1.0f)
         {
             try
             {
                 var locator = context.RootLocatorForSelector(selector);
-                Sync.Run(() => locator.First.WaitForAsync(new LocatorWaitForOptions
+                await locator.First.WaitForAsync(new LocatorWaitForOptions
                 {
                     State = WaitForSelectorState.Visible,
                     Timeout = (int)(timeoutSeconds * 1000)
-                }));
+                });
 
                 return true;
             }
@@ -153,16 +156,16 @@ namespace Ozone
             }
         }
 
-        public static bool ExistsOnXPath(Context context, string xpath, float timeoutSeconds = 1.0f)
+        public async static Task<bool> ExistsOnXPath(Context context, string xpath, float timeoutSeconds = 1.0f)
         {
             try
             {
                 var locator = context.RootLocatorForXPath(xpath);
-                Sync.Run(() => locator.First.WaitForAsync(new LocatorWaitForOptions
+                await locator.First.WaitForAsync(new LocatorWaitForOptions
                 {
                     State = WaitForSelectorState.Visible,
                     Timeout = (int)(timeoutSeconds * 1000)
-                }));
+                });
 
                 return true;
             }
@@ -181,19 +184,19 @@ namespace Ozone
         /// <summary>
         /// Executes the step if element by the selector is found.
         /// </summary>
-        public static FlowStep IfExists(string selector, FlowStep? onTrue = null, FlowStep? onFalse = null, float waitSeconds = 0) =>
-            context =>
+        public static Func<Context, Task<Context>> IfExists(string selector, Func<Context, Task<Context>>? onTrue = null, Func<Context, Task<Context>>? onFalse = null, float waitSeconds = 0) =>
+            async context =>
             {
-                bool exists = Exists(context, selector, waitSeconds);
+                bool exists = await Exists(context, selector, waitSeconds);
 
                 if (exists && onTrue != null)
                 {
-                    return onTrue(context);
+                    return await onTrue(context);
                 }
 
                 if (!exists && onFalse != null)
                 {
-                    return onFalse(context);
+                    return await onFalse(context);
                 }
 
                 return context;

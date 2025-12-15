@@ -16,40 +16,47 @@ namespace Ozone
         /// <summary>
         /// Creates a synchronous Playwright context and navigates to the given URL.
         /// </summary>
-        public static Context CreateContext(
+        public async static Task<Context> CreateContext(
             BrowserBrand browserBrand,
             Uri startPageUrl,
             bool headless = true)
         {
             ArgumentNullException.ThrowIfNull(startPageUrl);
 
-            var playwright = Sync.Run(() => Microsoft.Playwright.Playwright.CreateAsync());
+            var playwright = await Microsoft.Playwright.Playwright.CreateAsync();
+            IBrowser browser;
 
-            var browser = browserBrand switch
+            switch (browserBrand)
             {
-                BrowserBrand.Chromium or BrowserBrand.Chrome or BrowserBrand.Edge =>
-                    Sync.Run(() => playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+                case BrowserBrand.Chromium:
+                case BrowserBrand.Chrome:
+                case BrowserBrand.Edge:
+                    browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
                     {
                         Headless = headless
-                    })),
+                    });
+                    break;
 
-                BrowserBrand.Firefox =>
-                    Sync.Run(() => playwright.Firefox.LaunchAsync(new BrowserTypeLaunchOptions
+                case BrowserBrand.Firefox:
+                    browser = await playwright.Firefox.LaunchAsync(new BrowserTypeLaunchOptions
                     {
                         Headless = headless
-                    })),
+                    });
+                    break;
 
-                BrowserBrand.Webkit =>
-                    Sync.Run(() => playwright.Webkit.LaunchAsync(new BrowserTypeLaunchOptions
+                case BrowserBrand.Webkit:
+                    browser = await playwright.Webkit.LaunchAsync(new BrowserTypeLaunchOptions
                     {
                         Headless = headless
-                    })),
+                    });
+                    break;
 
-                _ => throw new NotSupportedException($"Browser brand {browserBrand} not supported.")
-            };
+                default:
+                    throw new NotSupportedException($"Browser brand {browserBrand} not supported.");
+            }
 
-            var page = Sync.Run(() => browser.NewPageAsync());
-            Sync.Run(() => page.GotoAsync(startPageUrl.ToString()));
+            var page = await browser.NewPageAsync();
+            await page.GotoAsync(startPageUrl.ToString());
 
             return new Context(playwright, browser, page, null, null, null);
         }
@@ -57,13 +64,13 @@ namespace Ozone
         /// <summary>
         /// Disposes browser and Playwright resources synchronously.
         /// </summary>
-        public static void Dispose(Context context)
+        public async static void Dispose(Context context)
         {
             try
             {
                 if (context.Browser != null)
                 {
-                    Sync.Run(() => context.Browser.CloseAsync());
+                    await context.Browser.CloseAsync();
                 }
             }
             catch (Exception x)

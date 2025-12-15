@@ -1,36 +1,33 @@
-﻿/*
-* Oxygen.Flow.Playwright library
-*/
-
+﻿
 using System.Runtime.CompilerServices;
 
 namespace Ozone
 {
-    public class FlowStep
+    public class AsyncChain
     {
         private readonly Func<Task<Context>> _taskSource;
 
-        private FlowStep(Func<Task<Context>> source)
+        private AsyncChain(Func<Task<Context>> source)
         {
             _taskSource = source;
         }
-        private FlowStep(Context context)
+        private AsyncChain(Context context)
         {
             _taskSource = async () => context;
         }
 
-        public static FlowStep From(Func<Task<Context>> source) => new(source);
-        public static FlowStep From(Context context) => new(context);
+        public static AsyncChain From(Func<Task<Context>> source) => new(source);
+        public static AsyncChain From(Context context) => new(context);
 
         public Task<Context> RunAsync() => _taskSource();
 
         public TaskAwaiter<Context> GetAwaiter() => _taskSource().GetAwaiter(); // enables await chain
 
-        public FlowStep Bind(Func<Context, Task<Context>> next)
+        public AsyncChain Bind(Func<Context, Task<Context>> next)
         {
             var taskSource = _taskSource;
 
-            return new FlowStep(async () =>
+            return new AsyncChain(async () =>
             {
                 var context = await taskSource();
 
@@ -52,7 +49,7 @@ namespace Ozone
             });
         }
 
-        public static FlowStep operator |(FlowStep step, Func<Context, Task<Context>> next) => step.Bind(next);
+        public static AsyncChain operator |(AsyncChain step, Func<Context, Task<Context>> next) => step.Bind(next);
 
     }
 

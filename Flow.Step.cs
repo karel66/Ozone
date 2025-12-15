@@ -14,16 +14,16 @@ namespace Ozone
         /// <summary>
         /// Run JavaScript in the page/frame.
         /// </summary>
-        public static FlowStep Script(string script, params object[] args) =>
-            context =>
+        public static Func<Context, Task<Context>> Script(string script, params object[] args) =>
+            async context =>
             {
                 if (context.Frame != null)
                 {
-                    Sync.Run(() => context.Frame.EvaluateAsync(script, args));
+                    await context.Frame.EvaluateAsync(script, args);
                 }
                 else
                 {
-                    Sync.Run(() => context.Page.EvaluateAsync(script, args));
+                    await context.Page.EvaluateAsync(script, args);
                 }
                 return context;
             };
@@ -32,8 +32,8 @@ namespace Ozone
         /// <summary>
         /// Locates and switches to iframe by selector.
         /// </summary>
-        public static FlowStep SwitchToFrame(string iframeSelector) =>
-            context =>
+        public static Func<Context, Task<Context>> SwitchToFrame(string iframeSelector) =>
+            async context =>
             {
                 var frameLocator = context.Page.FrameLocator(iframeSelector);
                 // FrameLocator does not return ILocator, so we need to get the frame itself.
@@ -53,19 +53,19 @@ namespace Ozone
         /// <summary>
         /// Executes the step only if the condition returns true.
         /// </summary>
-        public static FlowStep If(Func<Context, bool> condition, FlowStep step) =>
-            context => condition(context) ? step(context) : context;
+        public static Func<Context, Task<Context>> If(Func<Context, bool> condition, Func<Context, Task<Context>> step) =>
+            async context => condition(context) ? await step(context) : context;
 
         /// <summary>
         /// Executes the step while the condition returns true.
         /// </summary>
-        public static FlowStep While(Func<Context, bool> condition, FlowStep step) =>
-            context =>
+        public static Func<Context, Task<Context>> While(Func<Context, bool> condition, Func<Context, Task<Context>> step) =>
+            async context =>
             {
                 var current = context;
                 while (condition(current))
                 {
-                    current = step(current);
+                    current = await step(current);
                     if (current.HasProblem)
                     {
                         break;
@@ -117,8 +117,8 @@ namespace Ozone
         /// <summary>
         /// Provides the step result context for action.
         /// </summary>
-        public static FlowStep Use(FlowStep step, Action<Context> action) =>
-            context =>
+        public static Func<Context, Task<Context>> Use(Func<Context, Task<Context>> step, Action<Context> action) =>
+            async context =>
             {
                 if (context.HasProblem)
                 {
@@ -130,7 +130,8 @@ namespace Ozone
                     return context.CreateProblem($"{nameof(Use)}: NULL action argument.");
                 }
 
-                var result = step(context);
+                var result = await step(context);
+
                 if (!result.HasProblem)
                 {
                     result.Use(action);
@@ -142,8 +143,8 @@ namespace Ozone
         /// <summary>
         /// Provides the step result element for action.
         /// </summary>
-        public static FlowStep Use(FlowStep step, Action<ILocator> action) =>
-            context =>
+        public static Func<Context, Task<Context>> Use(Func<Context, Task<Context>> step, Action<ILocator> action) =>
+            async context =>
             {
                 if (context.HasProblem)
                 {
@@ -155,7 +156,8 @@ namespace Ozone
                     return context.CreateProblem($"{nameof(Use)}: NULL action argument.");
                 }
 
-                var result = step(context);
+                var result = await step(context);
+
                 if (!result.HasProblem && result.Element != null)
                 {
                     action(result.Element);
@@ -167,8 +169,8 @@ namespace Ozone
         /// <summary>
         /// Provides current context for action.
         /// </summary>
-        public static FlowStep Use(Action<Context> action) =>
-            context =>
+        public static Func<Context, Task<Context>> Use(Action<Context> action) =>
+            async context =>
             {
                 if (context.HasProblem)
                 {
@@ -186,8 +188,8 @@ namespace Ozone
         /// <summary>
         /// Provides current context element for the action.
         /// </summary>
-        public static FlowStep UseElement(Action<ILocator> action) =>
-            context =>
+        public static Func<Context, Task<Context>> UseElement(Action<ILocator> action) =>
+            async context =>
             {
                 if (context.HasProblem)
                 {
@@ -210,7 +212,7 @@ namespace Ozone
         /// <summary>
         /// Clicks on the context element.
         /// </summary>
-        public static Context Click(Context context)
+        public async static Task<Context> Click(Context context)
         {
             if (context.Element == null)
             {
@@ -219,7 +221,7 @@ namespace Ozone
 
             try
             {
-                Sync.Run(() => context.Element.ClickAsync());
+                await context.Element.ClickAsync();
                 return context;
             }
             catch (Exception x)
@@ -231,24 +233,25 @@ namespace Ozone
         /// <summary>
         /// Click on page element returned by given flow step.
         /// </summary>
-        public static FlowStep Click(FlowStep step) =>
-            context => context | step | Click;
+        public static Func<Context, Task<Context>> Click(Func<Context, Task<Context>> step) =>
+            async context => await (AsyncChain.From(context) | step | Click);
 
         /// <summary>
         /// Mouse click on page element returned by CSS selector.
         /// </summary>
-        public static FlowStep Click(string selector) =>
-            context =>
-                context
+        public static Func<Context, Task<Context>> Click(string selector) =>
+            async context =>
+                await (AsyncChain.From(context)
                 | Find(selector)
-                | Click;
+                | Click
+                );
 
         /// <summary>
         /// Double-click on context element.
         /// </summary>
-        public static Context DblClick(Context context)
+        public async static Task<Context> DblClick(Context context)
         {
-            var c = Click(context);
+            var c = await Click(context);
             if (c.HasProblem)
             {
                 return c;
@@ -256,7 +259,7 @@ namespace Ozone
 
             try
             {
-                Sync.Run(() => c.Element.DblClickAsync());
+                await c.Element.DblClickAsync();
                 return c;
             }
             catch (Exception x)
@@ -268,20 +271,20 @@ namespace Ozone
         /// <summary>
         /// Double-click element by selector.
         /// </summary>
-        public static FlowStep DblClick(string selector) =>
-            context => context | Find(selector) | DblClick;
+        public static Func<Context, Task<Context>> DblClick(string selector) =>
+            async context => await (AsyncChain.From(context) | Find(selector) | DblClick);
 
         /// <summary>
         /// Sets text box, text area and combo text on page.
         /// </summary>
-        public static FlowStep SetText(string selector, string text) =>
-            context => context | Find(selector) | SetText(text);
+        public static Func<Context, Task<Context>> SetText(string selector, string text) =>
+            async context => await (AsyncChain.From(context) | Find(selector) | SetText(text));
 
         /// <summary>
         /// Sets current context element text.
         /// </summary>
-        public static FlowStep SetText(string text) =>
-            context =>
+        public static Func<Context, Task<Context>> SetText(string text) =>
+            async context =>
             {
                 if (context.Element == null)
                 {
@@ -290,7 +293,7 @@ namespace Ozone
 
                 try
                 {
-                    Sync.Run(() => context.Element.FillAsync(text));
+                    await context.Element.FillAsync(text);
                     return context;
                 }
                 catch (Exception x)
@@ -302,7 +305,7 @@ namespace Ozone
         /// <summary>
         /// Send Enter key to the context element.
         /// </summary>
-        public static Context PressEnter(Context context)
+        public async static Task<Context> PressEnter(Context context)
         {
             if (context.Element == null)
             {
@@ -311,7 +314,7 @@ namespace Ozone
 
             try
             {
-                Sync.Run(() => context.Element.PressAsync("Enter"));
+                await context.Element.PressAsync("Enter");
                 return context;
             }
             catch (Exception x)
@@ -323,18 +326,18 @@ namespace Ozone
         /// <summary>
         /// Clicks the hyperlink and checks target window title.
         /// </summary>
-        public static FlowStep FollowLink(string selector, string targetTitle) =>
-            context =>
+        public static Func<Context, Task<Context>> FollowLink(string selector, string targetTitle) =>
+            async context =>
             {
-                var c = context | Click(selector);
+                var c = await Click(selector)(context);
                 if (c.HasProblem)
                 {
                     return c;
                 }
 
-                Sync.Run(() => c.Page.WaitForLoadStateAsync(LoadState.NetworkIdle));
+                await c.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-                string actual = Sync.Run(() => c.Page.TitleAsync());
+                string actual = await c.Page.TitleAsync();
 
                 if (string.Equals(actual, targetTitle, StringComparison.InvariantCulture))
                 {
@@ -344,8 +347,8 @@ namespace Ozone
                 return c.CreateProblem($"Expected title '{targetTitle}', actual '{actual}'");
             };
 
-        public static FlowStep AssertAttributeValue(string attributeName, string expected) =>
-            context =>
+        public static Func<Context, Task<Context>> AssertAttributeValue(string attributeName, string expected) =>
+            async context =>
             {
                 ArgumentNullException.ThrowIfNull(attributeName);
 
@@ -354,22 +357,22 @@ namespace Ozone
                     return context.CreateProblem($"AssertAttributeValue {attributeName}='{expected}': Missing context element.");
                 }
 
-                string actual = Sync.Run(() => context.Element.GetAttributeAsync(attributeName));
+                string actual = await context.Element.GetAttributeAsync(attributeName);
 
                 return actual == expected ?
                     context : context.CreateProblem($"Expected {attributeName}='{expected}', actual {attributeName}='{actual}'");
             };
 
-        public static FlowStep Assertion(Predicate<Context> predicate, string errorMessage) =>
-            context => predicate(context) ? context : context.CreateProblem(errorMessage);
+        public static Func<Context, Task<Context>> Assertion(Predicate<Context> predicate, string errorMessage) =>
+            async context => predicate(context) ? context : context.CreateProblem(errorMessage);
 
-        public static FlowStep Assertion(Predicate<Context> predicate, Func<Context, string> errorMessage) =>
-            context => predicate(context) ? context : context.CreateProblem(errorMessage(context));
+        public static Func<Context, Task<Context>> Assertion(Predicate<Context> predicate, Func<Context, string> errorMessage) =>
+            async context => predicate(context) ? context : context.CreateProblem(errorMessage(context));
 
-        public static FlowStep CreateProblem(object problem) =>
-            context => context.CreateProblem(problem);
+        public static Func<Context, Task<Context>> CreateProblem(object problem) =>
+            async context => context.CreateProblem(problem);
 
-        public static FlowStep CreateProblem(Func<Context, object> problem) =>
-            context => context.CreateProblem(problem(context));
+        public static Func<Context, Task<Context>> CreateProblem(Func<Context, object> problem) =>
+            async context => context.CreateProblem(problem(context));
     }
 }

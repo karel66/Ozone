@@ -86,18 +86,19 @@ namespace Ozone
         /// <summary>
         /// Current page title (synchronous).
         /// </summary>
-        public string Title {
-            get {
-                var page = Page;
-                if (page == null)
-                {
-                    return null;
-                }
-                else
-                {
-                    return Sync.Run(() => page.TitleAsync());
-                }
+        public async Task<string> Title()
+        {
+
+            var page = Page;
+            if (page == null)
+            {
+                return null;
             }
+            else
+            {
+                return await page.TitleAsync();
+            }
+
         }
 
         /// <summary>
