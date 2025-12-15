@@ -14,30 +14,29 @@ namespace Ozone
         /// <summary>
         /// Find element by CSS selector from page/frame.
         /// </summary>
-        public static FlowStep Find(string selector, int index = 0) =>
-            context =>
+        public static FlowStep Find(string selector, int index = 0)
+        {
+            if (context.Page == null)
             {
-                if (context.Page == null)
-                {
-                    return context.CreateProblem($"{nameof(Find)}: Missing Page");
-                }
+                return context.CreateProblem($"{nameof(Find)}: Missing Page");
+            }
 
-                var locator = context.RootLocatorForSelector(selector);
-                int count = Sync.Run(() => locator.CountAsync());
+            var locator = context.RootLocatorForSelector(selector);
+            int count = Sync.Run(() => locator.CountAsync());
 
-                if (count <= 0)
-                {
-                    return context.CreateProblem($"{nameof(Find)}: '{selector}' not found");
-                }
+            if (count <= 0)
+            {
+                return context.CreateProblem($"{nameof(Find)}: '{selector}' not found");
+            }
 
-                int idx = index < 0 ? count - 1 : index;
-                if (idx < 0 || idx >= count)
-                {
-                    return context.CreateProblem($"{nameof(Find)}: index {index} out of range (0..{count - 1})");
-                }
+            int idx = index < 0 ? count - 1 : index;
+            if (idx < 0 || idx >= count)
+            {
+                return context.CreateProblem($"{nameof(Find)}: index {index} out of range (0..{count - 1})");
+            }
 
-                return context.NextElement(locator.Nth(idx));
-            };
+            return context.NextElement(locator.Nth(idx));
+        }
 
         /// <summary>
         /// Find last element by selector.
@@ -182,7 +181,7 @@ namespace Ozone
         /// <summary>
         /// Executes the step if element by the selector is found.
         /// </summary>
-        public static FlowStep IfExists(string selector, FlowStep onTrue = null, FlowStep onFalse = null, float waitSeconds = 0) =>
+        public static FlowStep IfExists(string selector, FlowStep? onTrue = null, FlowStep? onFalse = null, float waitSeconds = 0) =>
             context =>
             {
                 bool exists = Exists(context, selector, waitSeconds);

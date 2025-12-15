@@ -168,34 +168,6 @@ namespace Ozone
         }
 
         /// <summary>
-        /// Monadic bind.
-        /// </summary>
-        public Context Bind(FlowStep step)
-        {
-            if (HasProblem)
-            {
-                return this;
-            }
-
-            if (step == null)
-            {
-                return CreateProblem($"{nameof(Bind)}: NULL argument: {nameof(step)}");
-            }
-
-            string signature = $"{ExtractMethodName(step.Method.Name)} ({FormatTarget(step.Target)})";
-            Flow.Log(signature);
-
-            try
-            {
-                return step.Invoke(this);
-            }
-            catch (Exception x)
-            {
-                return CreateProblem(x);
-            }
-        }
-
-        /// <summary>
         /// Synchronous action bind.
         /// </summary>
         public Context Use(Action<Context> action)
@@ -311,10 +283,5 @@ namespace Ozone
         }
 
         public static implicit operator string(Context c) => c.ToString();
-
-        /// <summary>
-        /// Overloaded | operator for Context.Bind(FlowStep)
-        /// </summary>
-        public static Context operator |(Context a, FlowStep b) => a.Bind(b);
     }
 }
