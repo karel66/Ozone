@@ -17,7 +17,7 @@ namespace Ozone
             return message;
         }
 
-        public static string LogError(string message, Exception x = null)
+        public static string LogError(string message, Exception? x = null)
         {
             string result = "*** ERROR *** " + message;
             if (x != null) result += ": " + x;

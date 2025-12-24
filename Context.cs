@@ -31,37 +31,31 @@ namespace Ozone
         /// <summary>
         /// Current frame (optional). If null, Page is used.
         /// </summary>
-        public IFrame Frame { get; }
+        public IFrame? Frame { get; }
 
         /// <summary>
         /// Current element.
         /// </summary>
-        public ILocator Element { get; }
+        public ILocator? Element { get; }
 
         /// <summary>
         /// Collection of elements.
         /// </summary>
-        public IReadOnlyList<ILocator> Collection { get; }
+        public IReadOnlyList<ILocator>? Collection { get; }
 
         /// <summary>
         /// Arbitrary user data.
         /// </summary>
-        public object UserCredentials { get; }
-
-        /// <summary>
-        /// Problem / error value.
-        /// </summary>
-        public object Problem { get; }
+        public object? UserCredentials { get; }
 
         internal Context(
             IPlaywright playwright,
             IBrowser browser,
             IPage page,
-            IFrame frame,
-            ILocator element,
-            IReadOnlyList<ILocator> collection,
-            object problem = null,
-            object credentials = null)
+            IFrame? frame,
+            ILocator? element,
+            IReadOnlyList<ILocator>? collection,
+            object? credentials = null)
         {
             Playwright = playwright;
             Browser = browser;
@@ -69,14 +63,8 @@ namespace Ozone
             Frame = frame;
             Element = element;
             Collection = collection;
-            Problem = problem;
             UserCredentials = credentials;
         }
-
-        /// <summary>
-        /// Indicates that there is a problem in the context.
-        /// </summary>
-        public bool HasProblem => Problem != null;
 
         /// <summary>
         /// Indicates that there is an element in the context.
@@ -88,11 +76,11 @@ namespace Ozone
         /// </summary>
         public async Task<string> Title()
         {
-
             var page = Page;
+
             if (page == null)
             {
-                return null;
+                return await Task.FromResult(string.Empty);
             }
             else
             {
@@ -132,32 +120,21 @@ namespace Ozone
         /// Returns context without Element or Collection.
         /// </summary>
         public Context EmptyContext() =>
-            new(Playwright, Browser, Page, Frame, null, null, null, UserCredentials);
+            new(Playwright, Browser, Page, Frame, null, null, UserCredentials);
 
         /// <summary>
         /// Set context Element.
         /// </summary>
         internal Context NextElement(ILocator element) =>
-            new(Playwright, Browser, Page, Frame, element, null, null, UserCredentials);
+            new(Playwright, Browser, Page, Frame, element, null, UserCredentials);
 
         /// <summary>
         /// Set context Collection.
         /// </summary>
         internal Context NextCollection(IReadOnlyList<ILocator> collection) =>
-            new(Playwright, Browser, Page, Frame, null, collection, null, UserCredentials);
+            new(Playwright, Browser, Page, Frame, null, collection, UserCredentials);
 
-        /// <summary>
-        /// Set frame.
-        /// </summary>
-        internal Context WithFrame(IFrame frame) =>
-            new(Playwright, Browser, Page, frame, Element, Collection, Problem, UserCredentials);
-
-        /// <summary>
-        /// Clear frame.
-        /// </summary>
-        internal Context WithoutFrame() =>
-            new(Playwright, Browser, Page, null, Element, Collection, Problem, UserCredentials);
-
+      
         /// <summary>
         /// Set problem.
         /// </summary>
@@ -165,7 +142,7 @@ namespace Ozone
         {
             problem ??= "Null passed as problem!";
             Flow.Log($"Problem created: {problem}");
-            return new Context(Playwright, Browser, Page, Frame, Element, Collection, problem, UserCredentials);
+            throw new ApplicationException(problem.ToString());
         }
 
         /// <summary>
@@ -173,11 +150,6 @@ namespace Ozone
         /// </summary>
         public Context Use(Action<Context> action)
         {
-            if (HasProblem)
-            {
-                return this;
-            }
-
             if (action == null)
             {
                 return CreateProblem($"{nameof(Use)}: NULL argument: {nameof(action)}");
@@ -198,63 +170,63 @@ namespace Ozone
         {
             StringBuilder args = new();
 
-            if (target != null)
+            if (target == null) return args.ToString();
+
+            Type type = target.GetType();
+
+            foreach (var field in type.GetFields())
             {
-                Type type = target.GetType();
+                object? argval = field.GetValue(target);
 
-                foreach (var field in type.GetFields())
+                if (argval == null)
                 {
-                    object argval = field.GetValue(target);
-
-                    if (argval == null)
+                    args.AppendWithComma($"{field.Name}=null");
+                }
+                else if (field.FieldType == typeof(string))
+                {
+                    args.AppendWithComma($"{field.Name}=\"{argval}\"");
+                }
+                else if (field.FieldType == typeof(char))
+                {
+                    args.AppendWithComma($"{field.Name}='{argval}'");
+                }
+                else if (field.FieldType.IsValueType)
+                {
+                    args.AppendWithComma($"{field.Name}={argval}");
+                }
+                else if (field.FieldType.IsArray)
+                {
+                    args.AppendWithComma($"{field.Name}=[");
+                    foreach (object value in (Array)argval)
                     {
-                        args.AppendWithComma($"{field.Name}=null");
+                        args.Append($"\"{value}\", ");
                     }
-                    else if (field.FieldType == typeof(string))
+                    args.Append(']');
+                }
+                else if (typeof(Delegate).IsAssignableFrom(field.FieldType))
+                {
+                    args.AppendWithComma($"{field.Name}=[{field.FieldType.Name}]");
+                }
+                else
+                {
+                    args.AppendWithComma($"{field.Name}={{");
+                    foreach (var prop in field.FieldType.GetProperties().Select(p => p.Name))
                     {
-                        args.AppendWithComma($"{field.Name}=\"{argval}\"");
-                    }
-                    else if (field.FieldType == typeof(char))
-                    {
-                        args.AppendWithComma($"{field.Name}='{argval}'");
-                    }
-                    else if (field.FieldType.IsValueType)
-                    {
-                        args.AppendWithComma($"{field.Name}={argval}");
-                    }
-                    else if (field.FieldType.IsArray)
-                    {
-                        args.AppendWithComma($"{field.Name}=[");
-                        foreach (object value in (Array)argval)
+                        try
                         {
-                            args.Append($"\"{value}\", ");
+                            object? val = field.FieldType
+                                .InvokeMember(prop, System.Reflection.BindingFlags.GetProperty, null, argval, null, null);
+                            args.Append($"{prop}:\"{val}\", ");
                         }
-                        args.Append(']');
-                    }
-                    else if (typeof(Delegate).IsAssignableFrom(field.FieldType))
-                    {
-                        args.AppendWithComma($"{field.Name}=[{field.FieldType.Name}]");
-                    }
-                    else
-                    {
-                        args.AppendWithComma($"{field.Name}={{");
-                        foreach (var prop in field.FieldType.GetProperties().Select(p => p.Name))
+                        catch (Exception x)
                         {
-                            try
-                            {
-                                object val = field.FieldType
-                                    .InvokeMember(prop, System.Reflection.BindingFlags.GetProperty, null, argval, null, null);
-                                args.Append($"{prop}:\"{val}\", ");
-                            }
-                            catch (Exception x)
-                            {
-                                args.Append($"{prop}:\"<Exception of type {x.GetType().Name}>\", ");
-                            }
+                            args.Append($"{prop}:\"<Exception of type {x.GetType().Name}>\", ");
                         }
-                        args.Append('}');
                     }
+                    args.Append('}');
                 }
             }
+
             return args.ToString();
         }
 
@@ -270,11 +242,6 @@ namespace Ozone
 
         public override string ToString()
         {
-            if (HasProblem)
-            {
-                return Problem.ToString();
-            }
-
             if (Page != null)
             {
                 return Page.Url;

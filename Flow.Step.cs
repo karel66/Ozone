@@ -3,6 +3,7 @@
 */
 
 using Microsoft.Playwright;
+using System;
 
 namespace Ozone
 {
@@ -42,14 +43,6 @@ namespace Ozone
                 return context.NextElement(locator);
             };
 
-
-
-        /// <summary>
-        /// Switch back to main page (clear frame).
-        /// </summary>
-        public static Context SwitchToDefault(Context context) =>
-            context.WithoutFrame();
-
         /// <summary>
         /// Executes the step only if the condition returns true.
         /// </summary>
@@ -63,14 +56,12 @@ namespace Ozone
             async context =>
             {
                 var current = context;
+
                 while (condition(current))
                 {
                     current = await step(current);
-                    if (current.HasProblem)
-                    {
-                        break;
-                    }
                 }
+
                 return current;
             };
 
@@ -120,22 +111,12 @@ namespace Ozone
         public static Func<Context, Task<Context>> Use(Func<Context, Task<Context>> step, Action<Context> action) =>
             async context =>
             {
-                if (context.HasProblem)
-                {
-                    return context;
-                }
-
                 if (action == null)
                 {
                     return context.CreateProblem($"{nameof(Use)}: NULL action argument.");
                 }
 
                 var result = await step(context);
-
-                if (!result.HasProblem)
-                {
-                    result.Use(action);
-                }
 
                 return result;
             };
@@ -146,11 +127,6 @@ namespace Ozone
         public static Func<Context, Task<Context>> Use(Func<Context, Task<Context>> step, Action<ILocator> action) =>
             async context =>
             {
-                if (context.HasProblem)
-                {
-                    return context;
-                }
-
                 if (action == null)
                 {
                     return context.CreateProblem($"{nameof(Use)}: NULL action argument.");
@@ -158,7 +134,7 @@ namespace Ozone
 
                 var result = await step(context);
 
-                if (!result.HasProblem && result.Element != null)
+                if (result.Element != null)
                 {
                     action(result.Element);
                 }
@@ -172,11 +148,6 @@ namespace Ozone
         public static Func<Context, Task<Context>> Use(Action<Context> action) =>
             async context =>
             {
-                if (context.HasProblem)
-                {
-                    return context;
-                }
-
                 if (action == null)
                 {
                     return context.CreateProblem($"{nameof(Use)}: NULL action argument.");
@@ -191,11 +162,6 @@ namespace Ozone
         public static Func<Context, Task<Context>> UseElement(Action<ILocator> action) =>
             async context =>
             {
-                if (context.HasProblem)
-                {
-                    return context;
-                }
-
                 if (action == null)
                 {
                     return context.CreateProblem($"{nameof(UseElement)}: NULL action argument.");
@@ -230,55 +196,37 @@ namespace Ozone
             }
         }
 
-        /// <summary>
-        /// Click on page element returned by given flow step.
-        /// </summary>
-        public static Func<Context, Task<Context>> Click(Func<Context, Task<Context>> step) =>
-            async context => await (AsyncChain.From(context) | step | Click);
 
         /// <summary>
         /// Mouse click on page element returned by CSS selector.
         /// </summary>
-        public static Func<Context, Task<Context>> Click(string selector) =>
-            async context =>
-                await (AsyncChain.From(context)
-                | Find(selector)
-                | Click
-                );
+        public static AsyncStep Click(string selector) =>
+                new AsyncStep(Find(selector)) | Click;
 
         /// <summary>
         /// Double-click on context element.
         /// </summary>
         public async static Task<Context> DblClick(Context context)
         {
-            var c = await Click(context);
-            if (c.HasProblem)
+            if (context.Element != null)
             {
-                return c;
+                await context.Element.ClickAsync();
+                await context.Element.DblClickAsync();
             }
-
-            try
-            {
-                await c.Element.DblClickAsync();
-                return c;
-            }
-            catch (Exception x)
-            {
-                return c.CreateProblem(x);
-            }
+            return context;
         }
 
         /// <summary>
         /// Double-click element by selector.
         /// </summary>
-        public static Func<Context, Task<Context>> DblClick(string selector) =>
-            async context => await (AsyncChain.From(context) | Find(selector) | DblClick);
+        public static AsyncStep DblClick(string selector) =>
+            new AsyncStep(Find(selector)) | DblClick;
 
         /// <summary>
         /// Sets text box, text area and combo text on page.
         /// </summary>
-        public static Func<Context, Task<Context>> SetText(string selector, string text) =>
-            async context => await (AsyncChain.From(context) | Find(selector) | SetText(text));
+        public static AsyncStep SetText(string selector, string text) =>
+            new AsyncStep(Find(selector)) | SetText(text);
 
         /// <summary>
         /// Sets current context element text.
@@ -329,22 +277,20 @@ namespace Ozone
         public static Func<Context, Task<Context>> FollowLink(string selector, string targetTitle) =>
             async context =>
             {
-                var c = await Click(selector)(context);
-                if (c.HasProblem)
-                {
-                    return c;
-                }
+                var c = await (context | Click(selector));
 
-                await c.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+                await context.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-                string actual = await c.Page.TitleAsync();
+                string actual = await context.Page.TitleAsync();
 
                 if (string.Equals(actual, targetTitle, StringComparison.InvariantCulture))
                 {
-                    return c;
+                    return context;
                 }
 
-                return c.CreateProblem($"Expected title '{targetTitle}', actual '{actual}'");
+                context.CreateProblem($"Expected title '{targetTitle}', actual '{actual}'");
+
+                return context;
             };
 
         public static Func<Context, Task<Context>> AssertAttributeValue(string attributeName, string expected) =>
@@ -352,12 +298,12 @@ namespace Ozone
             {
                 ArgumentNullException.ThrowIfNull(attributeName);
 
-                if (!context.HasElement)
+                if (context.Element == null)
                 {
                     return context.CreateProblem($"AssertAttributeValue {attributeName}='{expected}': Missing context element.");
                 }
 
-                string actual = await context.Element.GetAttributeAsync(attributeName);
+                string? actual = await context.Element.GetAttributeAsync(attributeName);
 
                 return actual == expected ?
                     context : context.CreateProblem($"Expected {attributeName}='{expected}', actual {attributeName}='{actual}'");
