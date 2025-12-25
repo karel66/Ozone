@@ -1,7 +1,3 @@
-﻿/*
-* Oxygen.Flow.Playwright.Sync library
-*/
-
 using Microsoft.Playwright;
 
 namespace Ozone
