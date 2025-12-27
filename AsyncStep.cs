@@ -15,29 +15,30 @@
         }
 
         /// <summary>
-        /// Bind next step function
+        /// Link next step function.
         /// </summary>
-        /// <param name="next"></param>
-        /// <returns></returns>
-        public AsyncStep Bind(Func<Context, Task<Context>> next)
+        public AsyncStep Link(Func<Context, Task<Context>> next) => Link(new AsyncStep(next));
+
+
+        /// <summary>
+        /// Link next step.
+        /// </summary>
+        public AsyncStep Link(AsyncStep next)
         {
-            _next = new AsyncStep(next);
-            return _next;
+            if (_next == null)
+            {
+                _next = next;
+            }
+            else
+            {
+                _next.Link(next);
+            }
+
+            return this;
         }
 
         /// <summary>
-        /// Bind next step
-        /// </summary>
-        /// <param name="next"></param>
-        /// <returns></returns>
-        public AsyncStep Bind(AsyncStep next)
-        {
-            _next = next;
-            return _next;
-        }
-
-        /// <summary>
-        /// Trigger chain of async steps by supplying inital context
+        /// Trigger chain of async steps by supplying inital context nad return the last successful step or the step with problem.
         /// </summary>
         public async Task<AsyncStep> Bind(Context context)
         {
@@ -46,48 +47,49 @@
                 return this;
             }
 
-            if (_next == null)
-            {
-                this._problem = new InvalidOperationException("No next step defined");
-                return this;
-            }
-
-            if(_step == null)
-            {
-                this._problem = new InvalidOperationException("No step function defined");
-                return this;
-            }
-
             try
             {
-                context = await _step(context);
-                return await _next.Bind(context);
+                if (_step != null)
+                {
+                    context = await _step(context);
+                }
+
+                if (_next != null)
+                {
+                    return await _next.Bind(context);
+                }
             }
 
             catch (Exception ex)
             {
                 _problem = ex;
-                return this;
             }
 
+            return this;
         }
 
         /// <summary>
-        /// Trigger chain of async steps by supplying inital context
+        /// Bind() method shortcut.
         /// </summary>
         public static Task<AsyncStep> operator |(Context context, AsyncStep step)
         {
             return step.Bind(context);
         }
 
+        /// <summary>
+        /// Link() method shortcut.
+        /// </summary>
         public static AsyncStep operator |(AsyncStep first, Func<Context, Task<Context>> next)
         {
-            return first.Bind(next);
+            return first.Link(next);
         }
 
+        /// <summary>
+        /// Link() method shortcut.
+        /// </summary>
         public static AsyncStep operator |(AsyncStep first, AsyncStep next)
         {
-            return first.Bind(next);
+            return first.Link(next);
         }
     }
 }

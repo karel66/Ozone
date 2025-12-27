@@ -67,11 +67,6 @@ namespace Ozone
         }
 
         /// <summary>
-        /// Indicates that there is an element in the context.
-        /// </summary>
-        public bool HasElement => Element != null;
-
-        /// <summary>
         /// Current page title (synchronous).
         /// </summary>
         public async Task<string> Title()
