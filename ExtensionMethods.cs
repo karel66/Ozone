@@ -12,6 +12,11 @@ namespace Ozone
             }
             return sb.Append(text);
         }
+
+        public static AsyncStep AsStep(this Func<Context, Task<Context>> stepFunc)
+        {
+            return new AsyncStep(stepFunc);
+        }
     }
 }
 

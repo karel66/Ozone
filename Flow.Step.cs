@@ -226,7 +226,7 @@ namespace Ozone
         /// Sets text box, text area and combo text on page.
         /// </summary>
         public static AsyncStep SetText(string selector, string text) =>
-            new AsyncStep(Find(selector)) | SetText(text);
+            Find(selector).AsStep() | SetText(text);
 
         /// <summary>
         /// Sets current context element text.
