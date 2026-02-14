@@ -1,125 +1,130 @@
 ## 1) Concise architecture summary
 
 **What it is**  
-`Ozone` is a small C#/.NET library that builds Playwright UI automation as composable async “steps” of shape `Func<Context, Task<Context>>`. A `Context` record carries Playwright objects (Playwright/Browser/Page/Frame) plus a “current” `Element`/`Collection` and a shared `Items` dictionary for passing data between steps.
+`Ozone` is a small .NET/C# library that provides a lightweight DSL on top of **Microsoft Playwright** for building UI automation as composable async “steps”. A step is typically `Func<Context, Task<Context>>`, where `Context` carries Playwright objects (Playwright/Browser/Page/optional Frame) plus a “current” `Element` / `Collection` and an `Items` dictionary for passing data between steps.
 
 **Main modules**
-- **Context / runtime state**
-  - `Context.cs`: `record Context : IAsyncDisposable` holding `IPlaywright`, `IBrowser`, `IPage`, optional `IFrame`, current `ILocator? Element`, `IReadOnlyList<ILocator>? Collection`, and `ConcurrentDictionary<string,string> Items`. Provides helper methods to create derived contexts (`NextElement`, `NextCollection`, `EmptyContext`) and error creation (`CreateProblem` throws `OzoneException`).
+- **Runtime state**
+  - `Context.cs`: immutable-ish `record Context : IAsyncDisposable` holding `IPlaywright`, `IBrowser`, `IPage`, optional `IFrame`, current `ILocator? Element`, `IReadOnlyList<ILocator>? Collection`, and `ConcurrentDictionary<string,string> Items`. Provides helpers `NextElement`, `NextCollection`, `EmptyContext`, and `CreateProblem()` (throws `OzoneException`).
 - **Step chaining**
-  - `AsyncStep.cs`: wraps a single step and links to the next (linked-list). `Bind(Context)` executes the chain. Overloads `|` to chain steps. Includes reflective method/closure tracing.
-- **Flow DSL**
-  - `Flow.cs`: creates Playwright/browser/page and navigates to a start URL; provides `Close(Context)`. Defines timeouts.
-  - `Flow.Absolute.cs`: “global” finders on page/frame (`Find`, `FindAll`, XPath variants, `Exists`, `IfExists`).
-  - `Flow.Relative.cs`: finders relative to the current `Context.Element`.
-  - `Flow.Steps.cs`: actions/control flow helpers (`Click`, `SetText`, `PressEnter`, `While`, `If`, `Retry`, `Script`, `SwitchToFrame`, assertions, collection filters).
-  - `Flow.Logging.cs`: console logging.
-- **Utilities**
-  - `ExtensionMethods.cs`: locator text/value/attribute helpers.
+  - `AsyncStep.cs`: linked-list step container that can `Bind(Context)` and chain via operator `|`. Includes tracing via `MethodTrace()` and reflection-based capture printing (`FormatTarget`).
+- **Flow DSL (static helpers)**
+  - `Flow.cs`: creates Playwright + browser + page and navigates to a start URL (`CreateContext`), plus `Close`.
+  - `Flow.Absolute.cs`: page/frame-level finders and existence checks (`Find`, `FindAll`, XPath variants, `Exists`, `IfExists`).
+  - `Flow.Relative.cs`: element-relative finders (`RelativeFind*`).
+  - `Flow.Steps.cs`: actions and control flow (`Click`, `SetText`, `PressEnter`, `While`, `If`, `Retry`, `Script`, `SwitchToFrame`, assertions, collection filters, etc.).
+  - `Flow.Logging.cs`: console logging helpers.
 
 **Entrypoints**
-- Primary startup: `Flow.CreateContext(BrowserBrand, Uri startPageUrl, bool headless=true)` (`Flow.cs`)
-- Execution patterns:
-  - Call step directly: `context = await Flow.Find("#id")(context);`
-  - Chain via `AsyncStep`: `await (context | (new AsyncStep(Flow.Find("#id")) | Flow.Click | ...));`
-- Cleanup: `await Flow.Close(context)` or `await context.DisposeAsync()` (`Context : IAsyncDisposable`)
+- Primary “startup”: `Flow.CreateContext(BrowserBrand, Uri startPageUrl, bool headless = true)` in `Flow.cs`.
+- Typical execution: call steps directly or chain using `AsyncStep` + `|`:
+  - Direct: `ctx = await Flow.Find("#id")(ctx);`
+  - Chained: `await (ctx | (new AsyncStep(Flow.Find("#id")) | Flow.Click | ...));`
+- Cleanup: `await Flow.Close(ctx)` or `await ctx.DisposeAsync()`.
 
 ---
 
-## 2) Top 10 risks / issues (with file references)
+## 2) Top 10 risks/issues (security, correctness, performance, maintainability)
 
-1) **TLS certificate validation disabled**
-   - `browser.NewPageAsync(new() { IgnoreHTTPSErrors = true })` makes MITM/cert issues invisible and is unsafe as a library default.
+1) **TLS/certificate validation disabled by default (security)**
+   - `browser.NewPageAsync(new() { IgnoreHTTPSErrors = true })` silently accepts bad certs → MITM and test false-positives.
    - File: `Flow.cs`
 
-2) **Potential secret exfiltration via reflective logging**
-   - `AsyncStep.MethodTrace()` logs `FormatTarget(_step.Target)` which reflects closure fields and prints string values unredacted (passwords/tokens captured in lambdas can end up in CI logs).
-   - Files: `AsyncStep.cs`, `Flow.Logging.cs`
+2) **High risk of leaking secrets/PII into logs (security)**
+   - `AsyncStep.MethodTrace()` uses `FormatTarget(_step.Target)` which reflects closure fields and prints raw string values (passwords/tokens commonly captured by lambdas).
+   - Files: `AsyncStep.cs`, logging to console via `Flow.Logging.cs`
 
-3) **Frame switching is likely incorrect / misleading**
-   - `SwitchToFrame` uses `FrameLocator(...).Locator(":root")` and stores it as `Element`, but does **not** set `Context.Frame`. Absolute finders (`RootLocatorForSelector/XPath`) rely on `Context.Frame` to scope searches, so subsequent “global” finds won’t be frame-scoped as the API implies.
+3) **`Use(step, Action<Context>)` is a functional bug (correctness)**
+   - The overload never calls `action(result)`; it just returns `result`. Callers will think their side-effect ran.
+   - File: `Flow.Steps.cs`
+
+4) **`SwitchToFrame` does not actually set `Context.Frame` (correctness/flakiness)**
+   - It sets `Element` to a `FrameLocator(...).Locator(":root")` but leaves `Context.Frame` null. Absolute finders (`RootLocatorForSelector/XPath`) scope by `Context.Frame`, so subsequent “global” finds are not truly frame-scoped as implied.
    - Files: `Flow.Steps.cs`, `Context.cs`, `Flow.Absolute.cs`
 
-4) **`Use(step, Action<Context>)` ignores the provided action**
-   - The overload checks for null, runs the step, and returns result without invoking `action(result)`—callers will assume side-effects occur but they won’t.
-   - File: `Flow.Steps.cs`
-
-5) **Retry behavior: delays only on exceptions, not on ordinary failure**
-   - `Retry(Func<Task<bool>> ...)` backs off only when an exception is thrown. If the function returns `false` repeatedly, it hot-loops with no delay.
-   - File: `Flow.Steps.cs`
-
-6) **Inconsistent waiting semantics across finders**
-   - `Find/FindAll/FindOnXPath` wait for `locator.First.WaitForAsync(FindTimeout)`, but `FindByText` does not wait, and `FindAllOnXPath` counts without a wait. This creates flaky timing differences depending on which API is used.
+5) **Inconsistent waiting semantics across finders (flakiness)**
+   - `Find/FindAll/FindOnXPath` wait for `.First.WaitForAsync`, but `FindByText` does not wait; `FindAllOnXPath` doesn’t wait before counting.
    - File: `Flow.Absolute.cs`
 
-7) **`Items[...]` indexer can throw `KeyNotFoundException`**
-   - `FirstContainingContextItem` / `LastContainingContextItem` use `context.Items[contextKey]` without `TryGetValue`, producing non-actionable runtime crashes.
+6) **`Retry` can hot-loop when `success()` returns `false` (performance/test load)**
+   - Delay is applied every iteration, but only after the attempt; more importantly it doesn’t distinguish “fast false” vs exceptions, and has fixed max 10. Also no cancellation token.
    - File: `Flow.Steps.cs`
 
-8) **Project targets `net10.0` (preview / adoption risk)**
-   - `TargetFramework` is `net10.0` which is not broadly available/stable in most CI and consumer environments yet; increases friction unnecessarily for a utility library.
+7) **`Items[...]` indexer can throw non-domain exceptions (correctness/diagnostics)**
+   - `FirstContainingContextItem` / `LastContainingContextItem` do `context.Items[contextKey]` → `KeyNotFoundException` instead of a domain error with context.
+   - File: `Flow.Steps.cs`
+
+8) **Disposal likely incomplete / potentially leaky (resource mgmt)**
+   - `Context.DisposeAsync()` closes the **browser**, disposes Playwright, but never explicitly closes the **page** (usually OK) and doesn’t handle multiple pages/contexts if expanded later. Also no try/finally around partial creation in `CreateContext`.
+   - Files: `Context.cs`, `Flow.cs`
+
+9) **Project targets `net10.0` (maintainability/adoption risk)**
+   - `net10.0` is not generally available/stable for many consumers/CI environments; makes the library harder to use.
    - File: `Ozone.csproj`
 
-9) **Package reference is MSTest-flavored Playwright**
-   - Library references `Microsoft.Playwright.MSTest`; as a general-purpose DSL library, this couples to MSTest unnecessarily and may bring unwanted dependencies.
+10) **Library depends on `Microsoft.Playwright.MSTest` (dependency hygiene)**
+   - This couples a general DSL library to MSTest-flavored package; can pull test-related dependencies and constrain consumers.
    - File: `Ozone.csproj`
-
-10) **Overly broad exception handling + console logging in core path**
-   - Many steps catch `Exception` and immediately throw via `CreateProblem` after logging to console; hard to integrate with structured logging or test frameworks without noisy output.
-   - Files: `Flow.Steps.cs`, `Context.cs`, `Flow.Logging.cs`
 
 ---
 
 ## 3) Prioritized plan of next actions (smallest safe steps first)
 
-1) **Stop leaking captured values in step tracing (security first)**
-   - Change `AsyncStep.MethodTrace()` / `FormatTarget` to avoid printing closure field values by default (log only method name, or redact strings, or add an explicit opt-in flag).
+1) **Stop logging closure-captured values by default (security)**
+   - Change `AsyncStep.MethodTrace()/FormatTarget` to *not* print field values. Options:
+     - log only method name; or
+     - redact all strings (e.g., `"***"`), or only show type names.
    - Files: `AsyncStep.cs`, `Flow.Logging.cs`
 
-2) **Make TLS behavior safe-by-default**
-   - Add parameter `ignoreHttpsErrors = false` to `Flow.CreateContext(...)` and pass it to `NewPageAsync`. Default should be `false`.
+2) **Make HTTPS validation safe-by-default**
+   - Add an `ignoreHttpsErrors = false` parameter to `Flow.CreateContext(...)` and pass it into `NewPageAsync`.
    - File: `Flow.cs`
 
-3) **Fix the `Use(step, Action<Context>)` bug**
-   - Invoke `action(result)` (ideally wrapped with try/catch -> `CreateProblem` for consistency).
+3) **Fix the broken `Use(step, Action<Context>)` overload**
+   - Invoke `action(result)` and consider try/catch to wrap with `CreateProblem`.
    - File: `Flow.Steps.cs`
 
-4) **Fix `Retry` to avoid hot loops**
-   - Add delay/backoff when `success()` returns `false` (not only on exception). Consider supporting cancellation token and configurable base delay.
+4) **Harden `Items` access**
+   - Use `TryGetValue` and throw a clear domain error via `CreateProblem($"Missing item '{contextKey}'")`.
    - File: `Flow.Steps.cs`
 
-5) **Harden `Items` access**
-   - Replace `context.Items[contextKey]` with `TryGetValue` and throw `CreateProblem($"Missing item '{contextKey}'")` when absent.
-   - File: `Flow.Steps.cs`
-
-6) **Normalize finder waiting semantics**
-   - Decide a consistent contract: all `Find*` methods wait (with shared default timeout) or provide explicit “TryFind/NoWait” variants.
+5) **Normalize finder waiting behavior**
+   - Decide and document a consistent contract:
+     - all `Find*` wait up to a timeout, or
+     - provide `Find*` (wait) and `TryFind*` (no-throw / short wait) variants.
    - File: `Flow.Absolute.cs`
 
-7) **Repair iframe/frame model**
-   - Decide whether `Context.Frame` is the authoritative scope:
-     - If yes: implement `SwitchToFrame` to actually set `Frame` in the context (new `NextFrame(IFrame frame)`), and ensure absolute searches use `Frame`.
-     - If no: remove `Frame` from `Context` and scope everything through locators consistently.
+6) **Fix frame-scoping model**
+   - Either:
+     - implement `SwitchToFrame` to locate the actual `IFrame` and set `Context.Frame` (add `NextFrame(IFrame)`), or
+     - remove `Frame` from `Context` and scope strictly via locators.
    - Files: `Context.cs`, `Flow.Steps.cs`, `Flow.Absolute.cs`
 
-8) **Retarget framework to stable LTS**
-   - Move to `net8.0` (optionally multi-target `net8.0;net9.0`) unless you have a concrete `net10` requirement.
+7) **Improve Retry API**
+   - Add cancellation token; configurable backoff; ensure it waits between attempts regardless of false/exception; optionally return diagnostics (attempt count, last exception).
+   - File: `Flow.Steps.cs`
+
+8) **Make resource creation/disposal more robust**
+   - Wrap `CreateContext` in try/catch/finally to dispose partially created objects on failure (e.g., navigation failure).
+   - Consider using a browser context (`IBrowser.NewContextAsync`) for isolation if this library grows.
+   - Files: `Flow.cs`, `Context.cs`
+
+9) **Retarget framework**
+   - Move to `net8.0` (or multi-target `net8.0;net9.0`) unless there is a hard requirement for `net10.0`.
    - File: `Ozone.csproj`
 
-9) **Decouple from MSTest package**
-   - Use `Microsoft.Playwright` unless MSTest-specific features are required; keep MSTest integration in a separate test project/package.
+10) **Decouple from MSTest package**
+   - Replace `Microsoft.Playwright.MSTest` with `Microsoft.Playwright` in the library; keep MSTest integration in a separate test project/package.
    - File: `Ozone.csproj`
-
-10) **Add minimal tests/examples**
-   - Add a small test project validating: chaining, `Use` actually runs, retry delays, finders wait consistently, frame switching works.
-   - New: `Ozone.Tests/*` (not currently present)
 
 ---
 
 ## 4) Secrets / unsafe data callout (explicit)
 
-- **No hard-coded credentials or API keys are visible** in the provided snapshot.
-- **High risk of accidental secret leakage to logs:** `AsyncStep.FormatTarget()` reflects and prints captured closure fields (including raw strings) which can include passwords/tokens/PII passed into step lambdas. This will be written to console via `Flow.Log`.
-  - Files: `AsyncStep.cs`, `Flow.Logging.cs`
-- **Unsafe transport default:** `IgnoreHTTPSErrors = true` disables TLS certificate validation by default.
+- **No hard-coded API keys/passwords are visible** in the provided snapshot.
+- **However, there is a strong risk of accidental secret leakage to logs**:
+  - `AsyncStep.FormatTarget()` reflects closure fields and prints string values unredacted, which can include credentials/tokens/PII passed into lambdas (common in UI automation).
+  - Files: `AsyncStep.cs` (FormatTarget/MethodTrace), output via `Flow.Logging.cs`
+- **Unsafe transport default**:
+  - `IgnoreHTTPSErrors = true` disables TLS verification by default.
   - File: `Flow.cs`
