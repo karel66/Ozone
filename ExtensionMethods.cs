@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using Microsoft.Playwright;
+using System.Text;
 
 namespace Ozone
 {
@@ -13,10 +14,37 @@ namespace Ozone
             return sb.Append(text);
         }
 
-        public static AsyncStep AsStep(this Func<Context, Task<Context>> stepFunc)
+        public async static Task<string?> Text(this ILocator locator, int timeoutSeconds = 1)
         {
-            return new AsyncStep(stepFunc);
+            var tag = await locator.EvaluateAsync<string>("e => e.tagName.toLowerCase()");
+
+            switch (tag)
+            {
+                case "input":
+                case "textarea":
+                case "select":
+                    return await locator.InputValueAsync(new() { Timeout = timeoutSeconds * 1000 });
+                default:
+                    return await locator.TextContentAsync(new() { Timeout = timeoutSeconds * 1000 });
+            }
         }
+
+        public async static Task<bool> TextContains(this ILocator locator, string textToSearch)
+        {
+            var controltext = await locator.Text();
+            if (controltext != null)
+            {
+                return controltext.Contains(textToSearch);
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        public async static Task<string?> GetAttribute(this ILocator locator, string attributName) =>
+            await locator.GetAttributeAsync(attributName);
+
     }
 }
 

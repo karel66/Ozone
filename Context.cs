@@ -1,17 +1,12 @@
-﻿/*
-* Oxygen.Flow.Playwright.Sync library
-*/
-
-using Microsoft.Playwright;
-using System.Text;
+﻿using Microsoft.Playwright;
+using System.Collections.Concurrent;
 
 namespace Ozone
 {
     /// <summary>
-    /// Flow context with monadic Bind for synchronous Playwright usage.
-    /// Immutable value type.
+    /// Flow context.
     /// </summary>
-    public readonly record struct Context
+    public record Context
     {
         /// <summary>
         /// Playwright root object.
@@ -44,9 +39,9 @@ namespace Ozone
         public IReadOnlyList<ILocator>? Collection { get; }
 
         /// <summary>
-        /// Arbitrary user data.
+        /// Dictionary for passing data items between AsyncSteps
         /// </summary>
-        public object? UserCredentials { get; }
+        public ConcurrentDictionary<string, string> Items { get; }
 
         internal Context(
             IPlaywright playwright,
@@ -55,16 +50,22 @@ namespace Ozone
             IFrame? frame,
             ILocator? element,
             IReadOnlyList<ILocator>? collection,
-            object? credentials = null)
+            ConcurrentDictionary<string, string> items)
         {
+
             Playwright = playwright;
             Browser = browser;
             Page = page;
             Frame = frame;
             Element = element;
             Collection = collection;
-            UserCredentials = credentials;
+            Items = items ?? new();
         }
+
+        /// <summary>
+        /// Indicates that there is an element in the context.
+        /// </summary>
+        public bool HasElement => Element != null;
 
         /// <summary>
         /// Current page title (synchronous).
@@ -89,6 +90,28 @@ namespace Ozone
         /// </summary>
         internal IPage EffectivePage => Page;
         internal IFrame EffectiveFrame => Frame ?? Page.MainFrame;
+
+        /// <summary>
+        /// Returns current context element text.
+        /// </summary>
+        public Task<string?> Text => Element?.Text();
+
+        /// <summary>
+        /// Returns current context element value attribute.
+        /// </summary>
+        public async Task<string?> Value()
+        {
+            if (Element != null)
+            {
+                return await Element.EvaluateAsync<string>("e => e.tagName.toLowerCase()") switch
+                {
+                    "input" or "textarea" or "select" => await Element.InputValueAsync(null),
+                    _ => await Element.TextContentAsync(null),
+                };
+            }
+            return null;
+        }
+
 
         internal ILocator RootLocatorForSelector(string selector)
         {
@@ -115,21 +138,21 @@ namespace Ozone
         /// Returns context without Element or Collection.
         /// </summary>
         public Context EmptyContext() =>
-            new(Playwright, Browser, Page, Frame, null, null, UserCredentials);
+            new(Playwright, Browser, Page, Frame, null, null, new());
 
         /// <summary>
         /// Set context Element.
         /// </summary>
         internal Context NextElement(ILocator element) =>
-            new(Playwright, Browser, Page, Frame, element, null, UserCredentials);
+            new(Playwright, Browser, Page, Frame, element, null, Items);
 
         /// <summary>
         /// Set context Collection.
         /// </summary>
         internal Context NextCollection(IReadOnlyList<ILocator> collection) =>
-            new(Playwright, Browser, Page, Frame, null, collection, UserCredentials);
+            new(Playwright, Browser, Page, Frame, null, collection, Items);
 
-      
+
         /// <summary>
         /// Set problem.
         /// </summary>
@@ -137,8 +160,11 @@ namespace Ozone
         {
             problem ??= "Null passed as problem!";
             Flow.Log($"Problem created: {problem}");
-            throw new ApplicationException(problem.ToString());
+            throw new OzoneException(problem.ToString());
         }
+
+        public Context CreateProblem(Func<Context, object> f) => CreateProblem(f(this));
+
 
         /// <summary>
         /// Synchronous action bind.
@@ -159,90 +185,6 @@ namespace Ozone
             {
                 return CreateProblem(x);
             }
-        }
-
-        static string FormatTarget(object target)
-        {
-            StringBuilder args = new();
-
-            if (target == null) return args.ToString();
-
-            Type type = target.GetType();
-
-            foreach (var field in type.GetFields())
-            {
-                object? argval = field.GetValue(target);
-
-                if (argval == null)
-                {
-                    args.AppendWithComma($"{field.Name}=null");
-                }
-                else if (field.FieldType == typeof(string))
-                {
-                    args.AppendWithComma($"{field.Name}=\"{argval}\"");
-                }
-                else if (field.FieldType == typeof(char))
-                {
-                    args.AppendWithComma($"{field.Name}='{argval}'");
-                }
-                else if (field.FieldType.IsValueType)
-                {
-                    args.AppendWithComma($"{field.Name}={argval}");
-                }
-                else if (field.FieldType.IsArray)
-                {
-                    args.AppendWithComma($"{field.Name}=[");
-                    foreach (object value in (Array)argval)
-                    {
-                        args.Append($"\"{value}\", ");
-                    }
-                    args.Append(']');
-                }
-                else if (typeof(Delegate).IsAssignableFrom(field.FieldType))
-                {
-                    args.AppendWithComma($"{field.Name}=[{field.FieldType.Name}]");
-                }
-                else
-                {
-                    args.AppendWithComma($"{field.Name}={{");
-                    foreach (var prop in field.FieldType.GetProperties().Select(p => p.Name))
-                    {
-                        try
-                        {
-                            object? val = field.FieldType
-                                .InvokeMember(prop, System.Reflection.BindingFlags.GetProperty, null, argval, null, null);
-                            args.Append($"{prop}:\"{val}\", ");
-                        }
-                        catch (Exception x)
-                        {
-                            args.Append($"{prop}:\"<Exception of type {x.GetType().Name}>\", ");
-                        }
-                    }
-                    args.Append('}');
-                }
-            }
-
-            return args.ToString();
-        }
-
-        static string ExtractMethodName(string reflectedName)
-        {
-            string name = reflectedName;
-            if (!string.IsNullOrEmpty(name) && name[0] == '<')
-            {
-                name = name[1..name.IndexOf('>')];
-            }
-            return name;
-        }
-
-        public override string ToString()
-        {
-            if (Page != null)
-            {
-                return Page.Url;
-            }
-
-            return "Uninitialized Context";
         }
 
         public static implicit operator string(Context c) => c.ToString();

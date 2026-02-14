@@ -1,9 +1,9 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 18
-VisualStudioVersion = 18.1.11312.151
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36705.20 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ozone", "..\..\Ozone\Ozone\Ozone.csproj", "{4EEE1A5B-82B0-E049-CD01-C2292B08C0C4}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ozone", "Ozone.csproj", "{717947F2-CF28-4753-9412-30C256D5F153}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -11,10 +11,10 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{4EEE1A5B-82B0-E049-CD01-C2292B08C0C4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{4EEE1A5B-82B0-E049-CD01-C2292B08C0C4}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{4EEE1A5B-82B0-E049-CD01-C2292B08C0C4}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{4EEE1A5B-82B0-E049-CD01-C2292B08C0C4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{717947F2-CF28-4753-9412-30C256D5F153}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{717947F2-CF28-4753-9412-30C256D5F153}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{717947F2-CF28-4753-9412-30C256D5F153}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{717947F2-CF28-4753-9412-30C256D5F153}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

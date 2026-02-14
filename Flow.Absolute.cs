@@ -1,4 +1,4 @@
-using Microsoft.Playwright;
+﻿using Microsoft.Playwright;
 
 namespace Ozone
 {
@@ -20,21 +20,36 @@ namespace Ozone
 
                 var locator = context.RootLocatorForSelector(selector);
 
-                int count = await locator.CountAsync();
+                try
+                {
+                    await locator.First.WaitForAsync(FindTimeout);
 
-                if (count == 0)
+                    int count = await locator.CountAsync();
+
+                    if (count == 0)
+                    {
+                        return context.CreateProblem($"{nameof(Find)}: '{selector}' not found");
+                    }
+
+                    if (index == 0)
+                    {
+                        return context.NextElement(locator.First);
+                    }
+
+                    int idx = index < 0 ? count - 1 : index;
+
+                    if (idx < 0 || idx >= count)
+                    {
+                        return context.CreateProblem($"{nameof(Find)}: index {index} out of range (0..{count - 1})");
+                    }
+
+                    return context.NextElement(locator.Nth(idx));
+                }
+
+                catch (TimeoutException)
                 {
                     return context.CreateProblem($"{nameof(Find)}: '{selector}' not found");
                 }
-
-                int idx = index < 0 ? count - 1 : index;
-
-                if (idx < 0 || idx >= count)
-                {
-                    return context.CreateProblem($"{nameof(Find)}: index {index} out of range (0..{count - 1})");
-                }
-
-                return context.NextElement(locator.Nth(idx));
             };
 
         /// <summary>
@@ -54,9 +69,12 @@ namespace Ozone
                 }
 
                 var locator = context.RootLocatorForSelector(selector);
+
+                await locator.First.WaitForAsync(FindTimeout);
+
                 int count = await locator.CountAsync();
 
-                if (count <= 0)
+                if (count == 0)
                 {
                     return context.CreateProblem($"{nameof(FindAll)}: '{selector}' not found");
                 }
@@ -81,20 +99,41 @@ namespace Ozone
                 }
 
                 var locator = context.RootLocatorForXPath(xpath);
+
+                await locator.First.WaitForAsync(FindTimeout);
+
                 int count = await locator.CountAsync();
 
-                if (count <= 0)
+                if (count == 0)
                 {
                     return context.CreateProblem($"{nameof(FindOnXPath)}: '{xpath}' not found");
                 }
 
-                int idx = index < 0 ? count - 1 : index;
+                if (index == 0)
+                {
+                    return context.NextElement(locator.First);
+                }
+
+                int idx = index < 0 ? count + index : index;
                 if (idx < 0 || idx >= count)
                 {
                     return context.CreateProblem($"{nameof(FindOnXPath)}: index {index} out of range (0..{count - 1})");
                 }
 
                 return context.NextElement(locator.Nth(idx));
+            };
+
+        public static Func<Context, Task<Context>> FindByText(string text) =>
+            async context =>
+            {
+                if (context.Page == null)
+                {
+                    return context.CreateProblem($"{nameof(FindByText)}: Missing Page");
+                }
+
+                var locator = context.Page.GetByText(text);
+
+                return context.NextElement(locator.First);
             };
 
         /// <summary>
@@ -125,31 +164,32 @@ namespace Ozone
             };
 
         /// <summary>
-        /// Check for existence of an element using CSS selector.
+        /// Find an element using CSS selector, otherwise returns null.
         /// </summary>
-        public async static Task<bool> Exists(Context context, string selector, float timeoutSeconds = 1.0f)
+        public async static Task<Context?> Exists(Context context, string selector, float timeoutSeconds = 1.0f)
         {
             try
             {
                 var locator = context.RootLocatorForSelector(selector);
-                await locator.First.WaitForAsync(new LocatorWaitForOptions
-                {
-                    State = WaitForSelectorState.Visible,
-                    Timeout = (int)(timeoutSeconds * 1000)
-                });
 
-                return true;
+                await locator.First.WaitForAsync(new LocatorWaitForOptions { Timeout = 1000 * timeoutSeconds });
+
+                var count = await locator.CountAsync();
+
+                if (count > 0)
+                {
+                    return context.NextElement(locator.First);
+                }
+
+                Log($"Selector {selector} does not exist.");
+                return null;
             }
             catch (TimeoutException)
             {
-                Log($"Exists [{selector}] not found");
-                return false;
+                Log($"Selector {selector} does not exist.");
+                return null;
             }
-            catch (PlaywrightException)
-            {
-                Log($"Exists [{selector}] not found");
-                return false;
-            }
+
         }
 
         public async static Task<bool> ExistsOnXPath(Context context, string xpath, float timeoutSeconds = 1.0f)
@@ -157,22 +197,12 @@ namespace Ozone
             try
             {
                 var locator = context.RootLocatorForXPath(xpath);
-                await locator.First.WaitForAsync(new LocatorWaitForOptions
-                {
-                    State = WaitForSelectorState.Visible,
-                    Timeout = (int)(timeoutSeconds * 1000)
-                });
-
-                return true;
+                await locator.First.WaitForAsync(FiveSecTimeout);
+                return await locator.CountAsync() > 0;
             }
             catch (TimeoutException)
             {
-                Log($"ExistsOnXPath [{xpath}] not found");
-                return false;
-            }
-            catch (PlaywrightException)
-            {
-                Log($"ExistsOnXPath [{xpath}] not found");
+                Log($"{xpath} not found");
                 return false;
             }
         }
@@ -180,17 +210,17 @@ namespace Ozone
         /// <summary>
         /// Executes the step if element by the selector is found.
         /// </summary>
-        public static Func<Context, Task<Context>> IfExists(string selector, Func<Context, Task<Context>>? onTrue = null, Func<Context, Task<Context>>? onFalse = null, float waitSeconds = 0) =>
+        public static Func<Context, Task<Context>> IfExists(string selector, Func<Context, Task<Context>>? onTrue = null, Func<Context, Task<Context>>? onFalse = null, float waitSeconds = 1) =>
             async context =>
             {
-                bool exists = await Exists(context, selector, waitSeconds);
+                var c = await Exists(context, selector, waitSeconds);
 
-                if (exists && onTrue != null)
+                if (c != null && onTrue != null)
                 {
-                    return await onTrue(context);
+                    return await onTrue(c);
                 }
 
-                if (!exists && onFalse != null)
+                if (c == null && onFalse != null)
                 {
                     return await onFalse(context);
                 }

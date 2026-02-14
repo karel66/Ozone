@@ -1,10 +1,4 @@
-﻿/*
-* Oxygen.Flow.Playwright library
-*/
-
-using System;
-
-namespace Ozone
+﻿namespace Ozone
 {
     /// <summary>
     /// Logging helpers.

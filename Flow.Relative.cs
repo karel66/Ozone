@@ -1,8 +1,4 @@
-﻿/*
-* Oxygen.Flow.Playwright.Sync library
-*/
-
-namespace Ozone
+﻿namespace Ozone
 {
     /// <summary>
     /// Relative searches (current element context).
@@ -76,9 +72,12 @@ namespace Ozone
                 }
 
                 var locator = context.Element.Locator($"xpath={xpath}");
-                int count = await locator.CountAsync();
 
-                if (count <= 0)
+                await locator.First.WaitForAsync(FiveSecTimeout);
+
+                var count = await locator.CountAsync();
+
+                if (count == 0)
                 {
                     return context.CreateProblem($"{nameof(RelativeFindOnXPath)}: '{xpath}' not found");
                 }

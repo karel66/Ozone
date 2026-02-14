@@ -1,91 +1,63 @@
-﻿/*
-* Oxygen.Flow.Playwright.Sync library
-*/
-
-using Microsoft.Playwright;
+﻿using Microsoft.Playwright;
 
 namespace Ozone
 {
     /// <summary>
-    /// Base class for synchronous Playwright UI flows.
+    /// Base class for Playwright UI flows.
     /// </summary>
     public partial class Flow
     {
+        static LocatorWaitForOptions FiveSecTimeout = new LocatorWaitForOptions { Timeout = 5000, State = WaitForSelectorState.Attached };
+
+        static LocatorWaitForOptions FindTimeout = new LocatorWaitForOptions { Timeout = 10000, State = WaitForSelectorState.Attached };
+
         protected Flow() { }
 
         /// <summary>
         /// Creates a synchronous Playwright context and navigates to the given URL.
         /// </summary>
-        public async static Task<Context> CreateContext(
-            BrowserBrand browserBrand,
-            Uri startPageUrl,
-            bool headless = true)
+        public async static Task<Context> CreateContext(BrowserBrand browserBrand, Uri startPageUrl, bool headless = true)
         {
             ArgumentNullException.ThrowIfNull(startPageUrl);
 
-            var playwright = await Microsoft.Playwright.Playwright.CreateAsync();
+            Log(startPageUrl.ToString());
+
+            var playwright = await Playwright.CreateAsync();
+
             IBrowser browser;
+
+            var options = new BrowserTypeLaunchOptions
+            {
+                Headless = headless
+            };
 
             switch (browserBrand)
             {
                 case BrowserBrand.Chromium:
                 case BrowserBrand.Chrome:
                 case BrowserBrand.Edge:
-                    browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-                    {
-                        Headless = headless
-                    });
+                    browser = await playwright.Chromium.LaunchAsync(options);
                     break;
 
                 case BrowserBrand.Firefox:
-                    browser = await playwright.Firefox.LaunchAsync(new BrowserTypeLaunchOptions
-                    {
-                        Headless = headless
-                    });
+                    browser = await playwright.Firefox.LaunchAsync(options);
                     break;
 
                 case BrowserBrand.Webkit:
-                    browser = await playwright.Webkit.LaunchAsync(new BrowserTypeLaunchOptions
-                    {
-                        Headless = headless
-                    });
+                    browser = await playwright.Webkit.LaunchAsync(options);
                     break;
 
                 default:
                     throw new NotSupportedException($"Browser brand {browserBrand} not supported.");
             }
+            ;
 
-            var page = await browser.NewPageAsync();
+            var page = await browser.NewPageAsync(new() { IgnoreHTTPSErrors = true });
+
             await page.GotoAsync(startPageUrl.ToString());
 
-            return new Context(playwright, browser, page, null, null, null);
+            return new Context(playwright, browser, page, null, null, null, new());
         }
 
-        /// <summary>
-        /// Disposes browser and Playwright resources synchronously.
-        /// </summary>
-        public async static void Dispose(Context context)
-        {
-            try
-            {
-                if (context.Browser != null)
-                {
-                    await context.Browser.CloseAsync();
-                }
-            }
-            catch (Exception x)
-            {
-                LogError("Error closing browser", x);
-            }
-
-            try
-            {
-                context.Playwright?.Dispose();
-            }
-            catch (Exception x)
-            {
-                LogError("Error disposing Playwright", x);
-            }
-        }
     }
 }

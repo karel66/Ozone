@@ -1,9 +1,4 @@
-﻿/*
-* Oxygen.Flow.Playwright.Sync library
-*/
-
-using Microsoft.Playwright;
-using System;
+﻿using Microsoft.Playwright;
 
 namespace Ozone
 {
@@ -46,20 +41,33 @@ namespace Ozone
         /// <summary>
         /// Executes the step only if the condition returns true.
         /// </summary>
-        public static Func<Context, Task<Context>> If(Func<Context, bool> condition, Func<Context, Task<Context>> step) =>
-            async context => condition(context) ? await step(context) : context;
+        public static Func<Context, Task<Context>> If(Func<Context, Task<bool>> condition, Func<Context, Task<Context>> step) =>
+            async context => await condition(context) ? await step(context) : context;
 
         /// <summary>
         /// Executes the step while the condition returns true.
         /// </summary>
-        public static Func<Context, Task<Context>> While(Func<Context, bool> condition, Func<Context, Task<Context>> step) =>
+        public static Func<Context, Task<Context>> While(Func<Context, Task<bool>> condition, Func<Context, Task<Context>> step) =>
             async context =>
             {
                 var current = context;
 
-                while (condition(current))
+                while (await condition(current))
                 {
                     current = await step(current);
+                }
+
+                return current;
+            };
+
+        public static Func<Context, Task<Context>> While(Func<Context, Task<bool>> condition, AsyncStep step) =>
+            async context =>
+            {
+                var current = context;
+
+                while (current != null && await condition(current))
+                {
+                    current = (await step.Bind(current)).Context;
                 }
 
                 return current;
@@ -105,6 +113,43 @@ namespace Ozone
             return false;
         }
 
+        public async static Task<bool> Retry(Func<Task<bool>> success, int maxAttempts = 10)
+        {
+            ArgumentNullException.ThrowIfNull(success);
+
+            int delay = 0;
+
+            if (maxAttempts < 1)
+            {
+                maxAttempts = 1;
+            }
+
+            if (maxAttempts > 10)
+            {
+                maxAttempts = 10;
+            }
+
+            for (int i = 1; i <= maxAttempts; i++)
+            {
+                try
+                {
+                    if (await success())
+                    {
+                        return true;
+                    }
+                }
+                catch (Exception x)
+                {
+                    LogError(x.Message);
+                    Log($"RETRY [{i}]");
+                    delay += 200;
+                    await Task.Delay(delay);
+                }
+            }
+
+            return false;
+        }
+
         /// <summary>
         /// Provides the step result context for action.
         /// </summary>
@@ -143,20 +188,6 @@ namespace Ozone
             };
 
         /// <summary>
-        /// Provides current context for action.
-        /// </summary>
-        public static Func<Context, Task<Context>> Use(Action<Context> action) =>
-            async context =>
-            {
-                if (action == null)
-                {
-                    return context.CreateProblem($"{nameof(Use)}: NULL action argument.");
-                }
-
-                return context.Use(action);
-            };
-
-        /// <summary>
         /// Provides current context element for the action.
         /// </summary>
         public static Func<Context, Task<Context>> UseElement(Action<ILocator> action) =>
@@ -187,7 +218,7 @@ namespace Ozone
 
             try
             {
-                await context.Element.ClickAsync();
+                await context.Element.ClickAsync(new() { Timeout = 60000 });
                 return context;
             }
             catch (Exception x)
@@ -196,12 +227,16 @@ namespace Ozone
             }
         }
 
-
         /// <summary>
         /// Mouse click on page element returned by CSS selector.
         /// </summary>
-        public static AsyncStep Click(string selector) =>
-                new AsyncStep(Find(selector)) | Click;
+
+        public static Func<Context, Task<Context>> Click(string selector) =>
+            async context => await Click(await Find(selector)(context));
+
+
+        //public static AsyncStep Click(string selector) =>
+        //        new AsyncStep(Find(selector)) | Click;
 
         /// <summary>
         /// Double-click on context element.
@@ -225,8 +260,13 @@ namespace Ozone
         /// <summary>
         /// Sets text box, text area and combo text on page.
         /// </summary>
-        public static AsyncStep SetText(string selector, string text) =>
-            Find(selector).AsStep() | SetText(text);
+        public static Func<Context, Task<Context>> SetText(string selector, string text) =>
+            async context =>
+            {
+                var c1 = await Find(selector)(context);
+                return await SetText(text)(c1);
+            };
+
 
         /// <summary>
         /// Sets current context element text.
@@ -241,7 +281,19 @@ namespace Ozone
 
                 try
                 {
-                    await context.Element.FillAsync(text);
+                    var tag = await context.Element.EvaluateAsync("el=>el.tagName");
+
+                    switch (tag.ToString())
+                    {
+                        case "SELECT":
+                            await context.Element.ClickAsync();
+                            await context.Element.SelectOptionAsync(text);
+                            break;
+
+                        default:
+                            await context.Element.FillAsync(text);
+                            break;
+                    }
                     return context;
                 }
                 catch (Exception x)
@@ -277,7 +329,7 @@ namespace Ozone
         public static Func<Context, Task<Context>> FollowLink(string selector, string targetTitle) =>
             async context =>
             {
-                var c = await (context | Click(selector));
+                var c = await Click(selector)(context);
 
                 await context.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
@@ -292,6 +344,173 @@ namespace Ozone
 
                 return context;
             };
+
+
+        static Func<Context, Task<Context>> CollectionFilter(Func<IReadOnlyList<ILocator>, Task<ILocator?>> filter) =>
+            async context =>
+            {
+                if (filter == null)
+                {
+                    return context.CreateProblem("CollectionFilter: NULL filter passed");
+                }
+
+                if (context.Collection == null)
+                {
+                    return context.CreateProblem("CollectionFilter: missing collection");
+                }
+
+                int count = context.Collection.Count;
+                if (count == 0)
+                {
+                    return context.CreateProblem("CollectionFilter: empty collection");
+                }
+
+                ILocator? child = await filter(context.Collection);
+
+                if (child == null)
+                {
+                    return context.CreateProblem($"CollectionFilter: no matches in {count} item(s)");
+                }
+
+                return context.NextElement(child);
+            };
+
+
+        public static Func<Context, Task<Context>> FirstContainingText(string text) =>
+           async context =>
+           {
+               if (context.Collection == null)
+               {
+                   return context.CreateProblem("Missing collection in context!");
+               }
+
+               foreach (var current in context.Collection)
+               {
+                   var itemText = await current.Text();
+
+                   if (itemText != null && itemText.Contains(text))
+                   {
+                       return context.NextElement(current);
+                   }
+               }
+
+               return context.CreateProblem($"Text '{text}' not found in the context collection."); ;
+           };
+
+        public static Func<Context, Task<Context>> FirstContainingContextItem(string contextKey) =>
+          async context =>
+          {
+              if (context.Collection == null)
+              {
+                  return context.CreateProblem("Missing collection in context!");
+              }
+
+              var text = context.Items[contextKey];
+
+              foreach (var current in context.Collection)
+              {
+                  var itemText = await current.Text();
+
+                  if (itemText != null && itemText.Contains(text))
+                  {
+                      return context.NextElement(current);
+                  }
+              }
+
+              return context.CreateProblem($"Text '{text}' not found in the context collection."); ;
+          };
+
+
+        /// <summary>
+        /// Returns element from context Collection
+        /// </summary>
+        public static Func<Context, Task<Context>> LastContainingText(string text) =>
+            async context =>
+            {
+                if (context.Collection == null)
+                {
+                    return context.CreateProblem("Missing collection in context!");
+                }
+
+                ILocator? last = null;
+
+                foreach (var current in context.Collection)
+                {
+                    var itemText = await current.Text();
+
+                    if (itemText != null && itemText.Contains(text))
+                    {
+                        last = current;
+                    }
+                }
+
+                if (last != null)
+                {
+                    return context.NextElement(last);
+                }
+
+                return context.CreateProblem($"Text '{text}' not found in the context collection."); ;
+            };
+
+        public static Func<Context, Task<Context>> LastContainingContextItem(string contextKey) =>
+           async context =>
+           {
+               if (context.Collection == null)
+               {
+                   return context.CreateProblem("Missing collection in context!");
+               }
+
+               ILocator? last = null;
+
+               var text = context.Items[contextKey];
+
+               foreach (var current in context.Collection)
+               {
+                   var itemText = await current.Text();
+
+                   if (itemText != null && itemText.Contains(text))
+                   {
+                       last = current;
+                   }
+               }
+
+               if (last != null)
+               {
+                   return context.NextElement(last);
+               }
+
+               return context.CreateProblem($"Text '{text}' not found in the context collection."); ;
+           };
+
+        /// <summary>
+        /// Select display text in the combobox context element
+        /// </summary>
+        public static AsyncStep SelectComboText(string selector, string value) =>
+            new AsyncStep(Find(selector)) | SelectComboText(value);
+
+        /// <summary>
+        /// Select display text in the combobox context element
+        /// </summary>
+        public static Func<Context, Task<Context>> SelectComboText(string value) =>
+        async (Context context) =>
+        {
+            ILocator? combo = context.Element;
+
+            if (combo == null)
+            {
+                return context.CreateProblem($"{nameof(SelectComboText)}: Missing context element");
+            }
+
+            var items = combo.SelectOptionAsync([value]).Result;
+
+            if (items == null || items.Count == 0)
+            {
+                return context.CreateProblem($"Can't find combo text '{value}'");
+            }
+
+            return context;
+        };
+
 
         public static Func<Context, Task<Context>> AssertAttributeValue(string attributeName, string expected) =>
             async context =>
@@ -315,8 +534,18 @@ namespace Ozone
         public static Func<Context, Task<Context>> Assertion(Predicate<Context> predicate, Func<Context, string> errorMessage) =>
             async context => predicate(context) ? context : context.CreateProblem(errorMessage(context));
 
+        public static Func<Context, Task<Context>> AssertAsync(Func<Context, Task<bool>> predicate, string errorMessage) =>
+            async context => await predicate(context) ? context : context.CreateProblem(errorMessage);
+
+        public static Func<Context, Task<Context>> AssertAsync(Func<Context, Task<bool>> predicate, Func<Context, Task<string>> errorMessage) =>
+            async context => await predicate(context) ? context : context.CreateProblem(await errorMessage(context));
+
+
         public static Func<Context, Task<Context>> CreateProblem(object problem) =>
             async context => context.CreateProblem(problem);
+
+        public static Func<Context, Task<Context>> CreateProblem(Task<object> problem) =>
+            async context => context.CreateProblem(await problem);
 
         public static Func<Context, Task<Context>> CreateProblem(Func<Context, object> problem) =>
             async context => context.CreateProblem(problem(context));
