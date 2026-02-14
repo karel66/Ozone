@@ -136,6 +136,12 @@ namespace Ozone
             new(Playwright, Browser, Page, Frame, element, null, Items);
 
         /// <summary>
+        /// Set context Frame.
+        /// </summary>
+        internal Context NextFrame(IFrame frame) =>
+            new(Playwright, Browser, Page, frame, null, null, Items);
+
+        /// <summary>
         /// Set context Collection.
         /// </summary>
         internal Context NextCollection(IReadOnlyList<ILocator> collection) =>

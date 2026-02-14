@@ -24,20 +24,6 @@ namespace Ozone
                 return context;
             };
 
-
-        /// <summary>
-        /// Locates and switches to iframe by selector.
-        /// </summary>
-        public static Func<Context, Task<Context>> SwitchToFrame(string iframeSelector) =>
-            async context =>
-            {
-                var frameLocator = context.Page.FrameLocator(iframeSelector);
-                // FrameLocator does not return ILocator, so we need to get the frame itself.
-                // Use FrameLocator.First.Locator(":root") to get the root locator of the frame.
-                var locator = frameLocator.Locator(":root");
-                return context.NextElement(locator);
-            };
-
         /// <summary>
         /// Executes the step only if the condition returns true.
         /// </summary>
@@ -136,47 +122,9 @@ namespace Ozone
 
                 var result = await step(context);
 
-                return result;
-            };
-
-        /// <summary>
-        /// Provides the step result element for action.
-        /// </summary>
-        public static Func<Context, Task<Context>> Use(Func<Context, Task<Context>> step, Action<ILocator> action) =>
-            async context =>
-            {
-                if (action == null)
-                {
-                    return context.CreateProblem($"{nameof(Use)}: NULL action argument.");
-                }
-
-                var result = await step(context);
-
-                if (result.Element != null)
-                {
-                    action(result.Element);
-                }
+                action(result);
 
                 return result;
-            };
-
-        /// <summary>
-        /// Provides current context element for the action.
-        /// </summary>
-        public static Func<Context, Task<Context>> UseElement(Action<ILocator> action) =>
-            async context =>
-            {
-                if (action == null)
-                {
-                    return context.CreateProblem($"{nameof(UseElement)}: NULL action argument.");
-                }
-
-                if (context.Element != null)
-                {
-                    action(context.Element);
-                }
-
-                return context;
             };
 
         /// <summary>
@@ -378,7 +326,10 @@ namespace Ozone
                   return context.CreateProblem("Missing collection in context!");
               }
 
-              var text = context.Items[contextKey];
+              if (!context.Items.TryGetValue(contextKey, out string? text))
+              {
+                  return context.CreateProblem($"Context item '{contextKey}' not found!");
+              }
 
               foreach (var current in context.Collection)
               {
