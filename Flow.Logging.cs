@@ -5,7 +5,7 @@
     /// </summary>
     public partial class Flow
     {
-        public static string Log(string message)
+        public static string? Log(string? message)
         {
             Console.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {message}");
             return message;

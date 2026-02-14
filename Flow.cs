@@ -59,5 +59,12 @@ namespace Ozone
             return new Context(playwright, browser, page, null, null, null, new());
         }
 
+        /// <summary>
+        /// Dispose resources used by the Playwright context.
+        /// </summary>
+        public async static Task Close(Context context)
+        {
+            await context.DisposeAsync();
+        }
     }
 }

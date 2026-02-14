@@ -26,9 +26,12 @@ namespace Ozone
         /// Trace execution
         /// </summary>
         /// <returns></returns>
-        public string MethodTrace()
+        public string? MethodTrace()
         {
-            if (_step == null) return null;
+            if (_step == null)
+            {
+                return null;
+            }
 
             var name = _step.Method.Name;
 
@@ -111,7 +114,7 @@ namespace Ozone
             return first.Link(next);
         }
 
-        static string FormatTarget(object target)
+        static string FormatTarget(object? target)
         {
             StringBuilder args = new();
 

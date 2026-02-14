@@ -65,9 +65,16 @@ namespace Ozone
             {
                 var current = context;
 
-                while (current != null && await condition(current))
+                while (await condition(current))
                 {
-                    current = (await step.Bind(current)).Context;
+                    var next = (await step.Bind(current)).Context;
+
+                    if (next == null)
+                    {
+                        break;
+                    }
+
+                    current = next;
                 }
 
                 return current;
@@ -76,43 +83,6 @@ namespace Ozone
         /// <summary>
         /// Retries until success or the given number of attempts has failed.
         /// </summary>
-        public static bool Retry(Func<bool> success, int maxAttempts = 10)
-        {
-            ArgumentNullException.ThrowIfNull(success);
-
-            int delay = 0;
-
-            if (maxAttempts < 1)
-            {
-                maxAttempts = 1;
-            }
-
-            if (maxAttempts > 10)
-            {
-                maxAttempts = 10;
-            }
-
-            for (int i = 1; i <= maxAttempts; i++)
-            {
-                try
-                {
-                    if (success())
-                    {
-                        return true;
-                    }
-                }
-                catch (Exception x)
-                {
-                    LogError(x.Message);
-                    Log($"RETRY [{i}]");
-                    delay += 200;
-                    System.Threading.Thread.Sleep(delay);
-                }
-            }
-
-            return false;
-        }
-
         public async static Task<bool> Retry(Func<Task<bool>> success, int maxAttempts = 10)
         {
             ArgumentNullException.ThrowIfNull(success);
@@ -141,11 +111,14 @@ namespace Ozone
                 catch (Exception x)
                 {
                     LogError(x.Message);
-                    Log($"RETRY [{i}]");
-                    delay += 200;
-                    await Task.Delay(delay);
                 }
+
+                Log($"RETRY [{i}]");
+                delay += 200;
+                await Task.Delay(delay);
             }
+
+            LogError($"RETRY FAILED");
 
             return false;
         }
@@ -481,36 +454,6 @@ namespace Ozone
 
                return context.CreateProblem($"Text '{text}' not found in the context collection."); ;
            };
-
-        /// <summary>
-        /// Select display text in the combobox context element
-        /// </summary>
-        public static AsyncStep SelectComboText(string selector, string value) =>
-            new AsyncStep(Find(selector)) | SelectComboText(value);
-
-        /// <summary>
-        /// Select display text in the combobox context element
-        /// </summary>
-        public static Func<Context, Task<Context>> SelectComboText(string value) =>
-        async (Context context) =>
-        {
-            ILocator? combo = context.Element;
-
-            if (combo == null)
-            {
-                return context.CreateProblem($"{nameof(SelectComboText)}: Missing context element");
-            }
-
-            var items = combo.SelectOptionAsync([value]).Result;
-
-            if (items == null || items.Count == 0)
-            {
-                return context.CreateProblem($"Can't find combo text '{value}'");
-            }
-
-            return context;
-        };
-
 
         public static Func<Context, Task<Context>> AssertAttributeValue(string attributeName, string expected) =>
             async context =>

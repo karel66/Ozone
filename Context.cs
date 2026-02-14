@@ -6,7 +6,7 @@ namespace Ozone
     /// <summary>
     /// Flow context.
     /// </summary>
-    public record Context
+    public record Context : IAsyncDisposable
     {
         /// <summary>
         /// Playwright root object.
@@ -70,20 +70,8 @@ namespace Ozone
         /// <summary>
         /// Current page title (synchronous).
         /// </summary>
-        public async Task<string> Title()
-        {
-            var page = Page;
+        public async Task<string> Title() => await (Page == null ? Task.FromResult(string.Empty) : Page.TitleAsync());
 
-            if (page == null)
-            {
-                return await Task.FromResult(string.Empty);
-            }
-            else
-            {
-                return await page.TitleAsync();
-            }
-
-        }
 
         /// <summary>
         /// Root "scope" to search in (frame or page).
@@ -94,7 +82,8 @@ namespace Ozone
         /// <summary>
         /// Returns current context element text.
         /// </summary>
-        public Task<string?> Text => Element?.Text();
+        public Task<string?> Text => 
+            Element==null? Task.FromResult<string?>(null) : Element.Text();
 
         /// <summary>
         /// Returns current context element value attribute.
@@ -138,7 +127,7 @@ namespace Ozone
         /// Returns context without Element or Collection.
         /// </summary>
         public Context EmptyContext() =>
-            new(Playwright, Browser, Page, Frame, null, null, new());
+            new(Playwright, Browser, Page, Frame, null, null, Items);
 
         /// <summary>
         /// Set context Element.
@@ -185,6 +174,18 @@ namespace Ozone
             {
                 return CreateProblem(x);
             }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (Browser != null)
+            {
+                await Browser.CloseAsync();
+            }
+
+            Playwright?.Dispose();
+
+            return;
         }
 
         public static implicit operator string(Context c) => c.ToString();
