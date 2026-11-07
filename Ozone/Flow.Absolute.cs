@@ -9,48 +9,10 @@ namespace Ozone
     {
         /// <summary>
         /// Find element by CSS selector from page/frame.
+        /// A negative index counts from the end (-1 is the last match).
         /// </summary>
         public static Func<Context, Task<Context>> Find(string selector, int index = 0) =>
-            async context =>
-            {
-                if(context.Page == null)
-                {
-                    return context.CreateProblem($"{nameof(Find)}: Missing Page");
-                }
-
-                var locator = context.RootLocatorForSelector(selector);
-
-                try
-                {
-                    await locator.First.WaitForAsync(FindTimeout);
-
-                    int count = await locator.CountAsync();
-
-                    if(count == 0)
-                    {
-                        return context.CreateProblem($"{nameof(Find)}: '{selector}' not found");
-                    }
-
-                    if(index == 0)
-                    {
-                        return context.NextElement(locator.First);
-                    }
-
-                    int idx = index < 0 ? count - 1 : index;
-
-                    if(idx < 0 || idx >= count)
-                    {
-                        return context.CreateProblem($"{nameof(Find)}: index {index} out of range (0..{count - 1})");
-                    }
-
-                    return context.NextElement(locator.Nth(idx));
-                }
-
-                catch(TimeoutException)
-                {
-                    return context.CreateProblem($"{nameof(Find)}: '{selector}' not found");
-                }
-            };
+            async context => await SelectOne(context, nameof(Find), selector, context.RootLocatorForSelector(selector), index, FindTimeout);
 
         /// <summary>
         /// Find last element by selector.
@@ -61,151 +23,55 @@ namespace Ozone
         /// Find all elements by CSS selector.
         /// </summary>
         public static Func<Context, Task<Context>> FindAll(string selector) =>
-            async context =>
-            {
-                if(context.Page == null)
-                {
-                    return context.CreateProblem($"{nameof(FindAll)}: Missing Page");
-                }
-
-                var locator = context.RootLocatorForSelector(selector);
-
-                await locator.First.WaitForAsync(FindTimeout);
-
-                int count = await locator.CountAsync();
-
-                if(count == 0)
-                {
-                    return context.CreateProblem($"{nameof(FindAll)}: '{selector}' not found");
-                }
-
-                var items = Enumerable.Range(0, count)
-                    .Select(i => locator.Nth(i))
-                    .ToList()
-                    .AsReadOnly();
-
-                return context.NextCollection(items);
-            };
+            async context => await SelectAll(context, nameof(FindAll), selector, context.RootLocatorForSelector(selector), FindTimeout);
 
         /// <summary>
         /// Find element by XPath from page/frame.
+        /// A negative index counts from the end (-1 is the last match).
         /// </summary>
         public static Func<Context, Task<Context>> FindOnXPath(string xpath, int index = 0, float timeoutSeconds = 1.0f) =>
-            async context =>
-            {
-                if(context.Page == null)
-                {
-                    return context.CreateProblem($"{nameof(FindOnXPath)}: Missing Page");
-                }
+            async context => await SelectOne(context, nameof(FindOnXPath), xpath, context.RootLocatorForXPath(xpath), index, WaitSeconds(timeoutSeconds));
 
-                var locator = context.RootLocatorForXPath(xpath);
-
-                await locator.First.WaitForAsync(new() { Timeout = timeoutSeconds * 1000 });
-
-                int count = await locator.CountAsync();
-
-                if(count == 0)
-                {
-                    return context.CreateProblem($"{nameof(FindOnXPath)}: '{xpath}' not found");
-                }
-
-                if(index == 0)
-                {
-                    return context.NextElement(locator.First);
-                }
-
-                int idx = index < 0 ? count + index : index;
-                if(idx < 0 || idx >= count)
-                {
-                    return context.CreateProblem($"{nameof(FindOnXPath)}: index {index} out of range (0..{count - 1})");
-                }
-
-                return context.NextElement(locator.Nth(idx));
-            };
-
+        /// <summary>
+        /// Find the first element containing the given text from page/frame.
+        /// </summary>
         public static Func<Context, Task<Context>> FindByText(string text) =>
-            async context =>
-            {
-                if(context.Page == null)
-                {
-                    return context.CreateProblem($"{nameof(FindByText)}: Missing Page");
-                }
-
-                var locator = context.Page.GetByText(text);
-
-                return context.NextElement(locator.First);
-            };
+            async context => await SelectOne(context, nameof(FindByText), text, context.RootLocatorForText(text), 0, FindTimeout);
 
         /// <summary>
         /// Find all elements by XPath from page/frame.
         /// </summary>
         public static Func<Context, Task<Context>> FindAllOnXPath(string xpath) =>
-            async context =>
-            {
-                if(context.Page == null)
-                {
-                    return context.CreateProblem($"{nameof(FindAllOnXPath)}: Missing Page");
-                }
-
-                var locator = context.RootLocatorForXPath(xpath);
-                int count = await locator.CountAsync();
-
-                if(count <= 0)
-                {
-                    return context.CreateProblem($"{nameof(FindAllOnXPath)}: '{xpath}' not found");
-                }
-
-                var items = Enumerable.Range(0, count)
-                    .Select(i => locator.Nth(i))
-                    .ToList()
-                    .AsReadOnly();
-
-                return context.NextCollection(items);
-            };
+            async context => await SelectAll(context, nameof(FindAllOnXPath), xpath, context.RootLocatorForXPath(xpath), FindTimeout);
 
         /// <summary>
         /// Find an element using CSS selector, otherwise returns null.
         /// </summary>
         public async static Task<Context?> Exists(Context context, string selector, float timeoutSeconds)
         {
-            try
+            var locator = context.RootLocatorForSelector(selector);
+
+            if(await WaitAndCount(locator, WaitSeconds(timeoutSeconds)) > 0)
             {
-                var locator = context.RootLocatorForSelector(selector);
-
-                await locator.First.WaitForAsync(new LocatorWaitForOptions { Timeout = 1000 * timeoutSeconds });
-
-                var count = await locator.CountAsync();
-
-                if(count > 0)
-                {
-                    return context.NextElement(locator.First);
-                }
-
-                Log($"Selector {selector} does not exist.");
-                return null;
-            }
-            catch(TimeoutException)
-            {
-                Log($"Selector {selector} does not exist.");
-                return null;
+                return context.NextElement(locator.First);
             }
 
+            Log($"Selector {selector} does not exist.");
+            return null;
         }
 
+        /// <summary>
+        /// Checks whether an element exists by XPath.
+        /// </summary>
         public async static Task<bool> ExistsOnXPath(Context context, string xpath, float timeoutSeconds = 1.0f)
         {
-            try
+            if(await WaitAndCount(context.RootLocatorForXPath(xpath), WaitSeconds(timeoutSeconds)) > 0)
             {
-                var locator = context.RootLocatorForXPath(xpath);
-                await locator.First.WaitForAsync(new() { Timeout = timeoutSeconds * 1000 });
-                int matches = await locator.CountAsync();
-                return matches > 0;
+                return true;
             }
-            catch(TimeoutException)
-            {
-                Log($"{xpath} not found");
-                return false;
-            }
+
+            Log($"{xpath} not found");
+            return false;
         }
 
         /// <summary>

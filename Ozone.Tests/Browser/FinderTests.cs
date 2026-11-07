@@ -208,23 +208,83 @@ public sealed class FinderTests
         Assert.AreEqual("alpha", seen);
     }
 
-    // --- Known issues from the code review; remove [Ignore] once fixed. ---
+    // --- Consistency across finders ---------------------------------------
 
     [TestMethod]
-    [Ignore("Known issue: FindAll lets Playwright's TimeoutException escape instead of OzoneException.")]
     public async Task FindAll_WhenNothingMatches_ThrowsOzoneException()
     {
         await using var context = await TestContexts.WithHtml(Html);
 
-        await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.FindAll("#missing")(context));
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.FindAll("#missing")(context));
+
+        StringAssert.Contains(x.Message, "FindAll: '#missing' not found");
     }
 
     [TestMethod]
-    [Ignore("Known issue: Find treats any negative index as 'last', FindOnXPath counts from the end.")]
-    public async Task Find_WithNegativeIndex_CountsFromEndLikeFindOnXPath()
+    public async Task FindOnXPath_WhenNothingMatches_ThrowsOzoneException()
     {
         await using var context = await TestContexts.WithHtml(Html);
 
+        await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.FindOnXPath("//table", timeoutSeconds: 0.2f)(context));
+    }
+
+    [TestMethod]
+    public async Task FindByText_WhenNothingMatches_ThrowsOzoneException()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+
+        await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.FindByText("no such text")(context));
+    }
+
+    [TestMethod]
+    public async Task FindByText_WaitsForElementToAppear()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+        await context.Page.EvaluateAsync(
+            "() => setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<p>late arrival</p>'), 300)");
+
+        Assert.AreEqual("late arrival", await TextOf(Flow.FindByText("late arrival")(context)));
+    }
+
+    [TestMethod]
+    public async Task RelativeFind_WaitsForChildToAppear()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+        var other = await Flow.Find("#other")(context);
+        await context.Page.EvaluateAsync(
+            "() => setTimeout(() => document.getElementById('other').insertAdjacentHTML('beforeend', '<b>late</b>'), 300)");
+
+        Assert.AreEqual("late", await TextOf(Flow.RelativeFind("b")(other)));
+    }
+
+    [TestMethod]
+    public async Task RelativeFindAll_WhenNothingMatches_ThrowsOzoneException()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+        var other = await Flow.Find("#other")(context);
+
+        await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.RelativeFindAll("li")(other));
+    }
+
+    [TestMethod]
+    public async Task NegativeIndex_CountsFromEndInEveryFinder()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+        var list = await Flow.Find("#list")(context);
+
         Assert.AreEqual("beta", await TextOf(Flow.Find("li.item", -2)(context)));
+        Assert.AreEqual("beta", await TextOf(Flow.FindOnXPath("//li", -2)(context)));
+        Assert.AreEqual("beta", await TextOf(Flow.RelativeFind("li", -2)(list)));
+        Assert.AreEqual("beta", await TextOf(Flow.RelativeFindOnXPath(".//li", -2)(list)));
+    }
+
+    [TestMethod]
+    public async Task NegativeIndex_BeyondStart_ThrowsOzoneException()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.Find("li.item", -4)(context));
+
+        StringAssert.Contains(x.Message, "index -4 out of range");
     }
 }

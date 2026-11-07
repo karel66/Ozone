@@ -116,6 +116,9 @@ namespace Ozone
             return Page.Locator(selector);
         }
 
+        internal ILocator RootLocatorForText(string text) =>
+            Frame != null ? Frame.GetByText(text) : Page.GetByText(text);
+
         internal ILocator RootLocatorForXPath(string xpath)
         {
             string sel = $"xpath={xpath}";

@@ -1,3 +1,5 @@
+using Microsoft.Playwright;
+
 namespace Ozone
 {
     /// <summary>
@@ -7,115 +9,38 @@ namespace Ozone
     {
         /// <summary>
         /// Searches child element of the current element.
+        /// A negative index counts from the end (-1 is the last match).
         /// </summary>
         public static Func<Context, Task<Context>> RelativeFind(string selector, int index = 0) =>
-            async context =>
-            {
-                if (context.Element == null)
-                {
-                    return context.CreateProblem($"{nameof(RelativeFind)}: Missing context Element");
-                }
-
-                var locator = context.Element.Locator(selector);
-                int count = await locator.CountAsync();
-
-                if (count <= 0)
-                {
-                    return context.CreateProblem($"{nameof(RelativeFind)}: '{selector}' not found");
-                }
-
-                int idx = index < 0 ? count - 1 : index;
-                if (idx < 0 || idx >= count)
-                {
-                    return context.CreateProblem($"{nameof(RelativeFind)}: index {index} out of range (0..{count - 1})");
-                }
-
-                return context.NextElement(locator.Nth(idx));
-            };
+            async context => await SelectOne(context, nameof(RelativeFind), selector, ChildLocator(context, nameof(RelativeFind), selector), index, FindTimeout);
 
         /// <summary>
         /// Searches all child elements of the current element.
         /// </summary>
         public static Func<Context, Task<Context>> RelativeFindAll(string selector) =>
-            async context =>
-            {
-                if (context.Element == null)
-                {
-                    return context.CreateProblem($"{nameof(RelativeFindAll)}: Missing context Element");
-                }
-
-                var locator = context.Element.Locator(selector);
-                int count = await locator.CountAsync();
-
-                if (count <= 0)
-                {
-                    return context.CreateProblem($"{nameof(RelativeFindAll)}: '{selector}' not found");
-                }
-
-                var items = Enumerable.Range(0, count)
-                    .Select(i => locator.Nth(i))
-                    .ToList()
-                    .AsReadOnly();
-
-                return context.NextCollection(items);
-            };
+            async context => await SelectAll(context, nameof(RelativeFindAll), selector, ChildLocator(context, nameof(RelativeFindAll), selector), FindTimeout);
 
         /// <summary>
         /// Searches child element of the current element using XPath.
+        /// A negative index counts from the end (-1 is the last match).
         /// </summary>
         public static Func<Context, Task<Context>> RelativeFindOnXPath(string xpath, int index = 0) =>
-            async context =>
-            {
-                if (context.Element == null)
-                {
-                    return context.CreateProblem($"{nameof(RelativeFindOnXPath)}: Missing context Element");
-                }
-
-                var locator = context.Element.Locator($"xpath={xpath}");
-
-                await locator.First.WaitForAsync(FiveSecTimeout);
-
-                var count = await locator.CountAsync();
-
-                if (count == 0)
-                {
-                    return context.CreateProblem($"{nameof(RelativeFindOnXPath)}: '{xpath}' not found");
-                }
-
-                int idx = index < 0 ? count - 1 : index;
-                if (idx < 0 || idx >= count)
-                {
-                    return context.CreateProblem($"{nameof(RelativeFindOnXPath)}: index {index} out of range (0..{count - 1})");
-                }
-
-                return context.NextElement(locator.Nth(idx));
-            };
+            async context => await SelectOne(context, nameof(RelativeFindOnXPath), xpath, ChildLocator(context, nameof(RelativeFindOnXPath), $"xpath={xpath}"), index, FindTimeout);
 
         /// <summary>
         /// Searches all child elements of the current element using XPath.
         /// </summary>
         public static Func<Context, Task<Context>> RelativeFindAllOnXPath(string xpath) =>
-            async context =>
+            async context => await SelectAll(context, nameof(RelativeFindAllOnXPath), xpath, ChildLocator(context, nameof(RelativeFindAllOnXPath), $"xpath={xpath}"), FindTimeout);
+
+        static ILocator ChildLocator(Context context, string stepName, string selector)
+        {
+            if (context.Element == null)
             {
-                if (context.Element == null)
-                {
-                    return context.CreateProblem($"{nameof(RelativeFindAllOnXPath)}: Missing context Element");
-                }
+                context.CreateProblem($"{stepName}: Missing context Element");
+            }
 
-                var locator = context.Element.Locator($"xpath={xpath}");
-                int count = await locator.CountAsync();
-
-                if (count <= 0)
-                {
-                    return context.CreateProblem($"{nameof(RelativeFindAllOnXPath)}: '{xpath}' not found");
-                }
-
-                var items = Enumerable.Range(0, count)
-                    .Select(i => locator.Nth(i))
-                    .ToList()
-                    .AsReadOnly();
-
-                return context.NextCollection(items);
-            };
+            return context.Element.Locator(selector);
+        }
     }
 }
