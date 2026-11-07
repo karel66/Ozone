@@ -1,12 +1,14 @@
-﻿using Microsoft.Playwright;
+using Microsoft.Playwright;
+
 using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace Ozone
 {
     /// <summary>
     /// Flow context.
     /// </summary>
-    public record Context : IAsyncDisposable
+    public class Context : IAsyncDisposable
     {
         /// <summary>
         /// Playwright root object.
@@ -70,7 +72,7 @@ namespace Ozone
         /// <summary>
         /// Current page title (synchronous).
         /// </summary>
-        public async Task<string> Title() => await (Page == null ? Task.FromResult(string.Empty) : Page.TitleAsync());
+        public async Task<string> Title() => Page == null ? string.Empty : await Page.TitleAsync();
 
 
         /// <summary>
@@ -82,15 +84,15 @@ namespace Ozone
         /// <summary>
         /// Returns current context element text.
         /// </summary>
-        public Task<string?> Text => 
-            Element==null? Task.FromResult<string?>(null) : Element.Text();
+        public Task<string?> Text =>
+            Element == null ? Task.FromResult<string?>(null) : Element.Text();
 
         /// <summary>
         /// Returns current context element value attribute.
         /// </summary>
         public async Task<string?> Value()
         {
-            if (Element != null)
+            if(Element != null)
             {
                 return await Element.EvaluateAsync<string>("e => e.tagName.toLowerCase()") switch
                 {
@@ -104,7 +106,7 @@ namespace Ozone
 
         internal ILocator RootLocatorForSelector(string selector)
         {
-            if (Frame != null)
+            if(Frame != null)
             {
                 return Frame.Locator(selector);
             }
@@ -115,7 +117,7 @@ namespace Ozone
         internal ILocator RootLocatorForXPath(string xpath)
         {
             string sel = $"xpath={xpath}";
-            if (Frame != null)
+            if(Frame != null)
             {
                 return Frame.Locator(sel);
             }
@@ -166,7 +168,7 @@ namespace Ozone
         /// </summary>
         public Context Use(Action<Context> action)
         {
-            if (action == null)
+            if(action == null)
             {
                 return CreateProblem($"{nameof(Use)}: NULL argument: {nameof(action)}");
             }
@@ -176,24 +178,25 @@ namespace Ozone
                 action.Invoke(this);
                 return this;
             }
-            catch (Exception x)
+            catch(Exception x)
             {
                 return CreateProblem(x);
             }
         }
 
+        bool _disposed = false;
+
         public async ValueTask DisposeAsync()
         {
-            if (Browser != null)
+            if(!_disposed)
             {
+                Trace.TraceInformation("Context: DisposeAsync()");
+                await Page.CloseAsync();
                 await Browser.CloseAsync();
+                _disposed = true;
             }
-
-            Playwright?.Dispose();
-
-            return;
         }
 
-        public static implicit operator string(Context c) => c.ToString();
+        public static implicit operator string?(Context c) => c.ToString();
     }
 }
