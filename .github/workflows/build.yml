@@ -1,0 +1,41 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore Ozone.sln
+
+      - name: Build
+        run: dotnet build Ozone.sln --no-restore -c Release
+
+      - name: Unit tests
+        run: dotnet test Ozone.sln --no-build -c Release --filter "TestCategory!=Browser"
+
+      - name: Install Chromium
+        run: pwsh Ozone.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Browser tests
+        run: dotnet test Ozone.sln --no-build -c Release --filter "TestCategory=Browser"
+
+      - name: Pack
+        run: dotnet pack Ozone/Ozone.csproj --no-build -c Release -o artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: artifacts/

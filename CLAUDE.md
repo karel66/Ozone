@@ -20,6 +20,8 @@ Tests are split into `Ozone.Tests/Unit` (no browser: they build a `Context` with
 To run browser tests or flows locally, the Playwright browsers must be installed once after building:
 `powershell Ozone.Tests/bin/Debug/net10.0/playwright.ps1 install chromium` (Windows PowerShell 5.1 works; `pwsh` is not required). The browser revision is tied to the `Microsoft.Playwright` package version, so rerun this after upgrading the package.
 
+CI (`.github/workflows/build.yml`, ubuntu) mirrors this: Release build, unit tests, `playwright.ps1 install --with-deps chromium`, browser tests, then `dotnet pack` (the package includes the root `README.md`).
+
 ## Architecture
 
 **The step model.** Every operation is a `Func<Context, Task<Context>>`. Static factory methods on `Flow` (e.g. `Find(selector)`, `SetText(text)`) return such functions; parameterless steps (`Click`, `PressEnter`, `DblClick`) are themselves `Task<Context> M(Context)` methods usable as method groups. Steps return a *new* `Context` rather than mutating it.
