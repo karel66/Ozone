@@ -19,7 +19,7 @@ public sealed class FinderTests
         <p>Plain paragraph text</p>
         """;
 
-    static async Task<string?> TextOf(Task<Context> step) => await (await step).Text;
+    static async Task<string?> TextOf(Task<Context> step) => await (await step).TextAsync();
 
     [TestMethod]
     public async Task Find_ByDefault_ReturnsFirstMatch()
@@ -202,7 +202,7 @@ public sealed class FinderTests
         await using var context = await TestContexts.WithHtml(Html);
         string? seen = null;
 
-        await Flow.IfExists("li.item", async c => { seen = await c.Text; return c; })(context);
+        await Flow.IfExists("li.item", async c => { seen = await c.TextAsync(); return c; })(context);
 
         Assert.AreEqual("alpha", seen);
     }

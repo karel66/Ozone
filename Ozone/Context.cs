@@ -87,38 +87,28 @@ namespace Ozone
         public bool HasElement => Element != null;
 
         /// <summary>
-        /// Current page title (synchronous).
+        /// Current page title.
         /// </summary>
-        public async Task<string> Title() => Page == null ? string.Empty : await Page.TitleAsync();
-
-
-        /// <summary>
-        /// Root "scope" to search in (frame or page).
-        /// </summary>
-        internal IPage EffectivePage => Page;
-        internal IFrame EffectiveFrame => Frame ?? Page.MainFrame;
+        public Task<string> Title() => Page.TitleAsync();
 
         /// <summary>
-        /// Returns current context element text.
+        /// Returns the context element's text: the input value of an input, textarea or select
+        /// element, otherwise its text content. Null if there is no context element.
         /// </summary>
-        public Task<string?> Text =>
+        public Task<string?> TextAsync() =>
             Element == null ? Task.FromResult<string?>(null) : Element.Text();
 
         /// <summary>
-        /// Returns current context element value attribute.
+        /// Returns the context element's text.
         /// </summary>
-        public async Task<string?> Value()
-        {
-            if(Element != null)
-            {
-                return await Element.EvaluateAsync<string>("e => e.tagName.toLowerCase()") switch
-                {
-                    "input" or "textarea" or "select" => await Element.InputValueAsync(null),
-                    _ => await Element.TextContentAsync(null),
-                };
-            }
-            return null;
-        }
+        [Obsolete("Use TextAsync().")]
+        public Task<string?> Text => TextAsync();
+
+        /// <summary>
+        /// Returns the context element's text.
+        /// </summary>
+        [Obsolete("Use TextAsync(); it returns the same value.")]
+        public Task<string?> Value() => TextAsync();
 
 
         internal ILocator RootLocatorForSelector(string selector)
@@ -171,8 +161,14 @@ namespace Ozone
         /// <summary>
         /// Set context Frame.
         /// </summary>
-        internal Context NextFrame(IFrame frame) =>
+        internal Context NextFrame(IFrame? frame) =>
             new(Playwright, Browser, Page, frame, null, null, Items, FindTimeout, OwnsBrowser);
+
+        /// <summary>
+        /// Continue on another page (e.g. a popup window), in its main frame.
+        /// </summary>
+        internal Context NextPage(IPage page) =>
+            new(Playwright, Browser, page, null, null, null, Items, FindTimeout, OwnsBrowser);
 
         /// <summary>
         /// Set context Collection.
@@ -281,13 +277,6 @@ namespace Ozone
                     Playwright.Dispose();
                 }
             }
-
-            GC.SuppressFinalize(this);
         }
-
-        /// <summary>
-        /// Converts the context to its <see cref="object.ToString"/> value.
-        /// </summary>
-        public static implicit operator string?(Context c) => c.ToString();
     }
 }

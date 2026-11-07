@@ -37,8 +37,8 @@ public sealed class StepTests
         var input = await Flow.SetText("#i", "hello")(context);
         var area = await Flow.SetText("#t", "multi\nline")(context);
 
-        Assert.AreEqual("hello", await input.Value());
-        Assert.AreEqual("multi\nline", await area.Value());
+        Assert.AreEqual("hello", await input.TextAsync());
+        Assert.AreEqual("multi\nline", await area.TextAsync());
     }
 
     [TestMethod]
@@ -49,7 +49,7 @@ public sealed class StepTests
 
         var select = await Flow.SetText("#s", "b")(context);
 
-        Assert.AreEqual("b", await select.Value());
+        Assert.AreEqual("b", await select.TextAsync());
     }
 
     [TestMethod]
@@ -111,8 +111,8 @@ public sealed class StepTests
         await using var context = await TestContexts.WithHtml(ListHtml);
         var items = await Flow.FindAll("li")(context);
 
-        Assert.AreEqual("apple pie", await (await Flow.FirstContainingText("apple")(items)).Text);
-        Assert.AreEqual("apple tart", await (await Flow.LastContainingText("apple")(items)).Text);
+        Assert.AreEqual("apple pie", await (await Flow.FirstContainingText("apple")(items)).TextAsync());
+        Assert.AreEqual("apple tart", await (await Flow.LastContainingText("apple")(items)).TextAsync());
     }
 
     [TestMethod]
@@ -122,8 +122,8 @@ public sealed class StepTests
         context.Items["fruit"] = "apple";
         var items = await Flow.FindAll("li")(context);
 
-        Assert.AreEqual("apple pie", await (await Flow.FirstContainingContextItem("fruit")(items)).Text);
-        Assert.AreEqual("apple tart", await (await Flow.LastContainingContextItem("fruit")(items)).Text);
+        Assert.AreEqual("apple pie", await (await Flow.FirstContainingContextItem("fruit")(items)).TextAsync());
+        Assert.AreEqual("apple tart", await (await Flow.LastContainingContextItem("fruit")(items)).TextAsync());
     }
 
     [TestMethod]
@@ -151,7 +151,6 @@ public sealed class StepTests
         Assert.AreEqual("content here", await div.Text());
         Assert.IsTrue(await div.TextContains("here"));
         Assert.IsFalse(await div.TextContains("absent"));
-        Assert.AreEqual("attr", await input.GetAttribute("data-x"));
     }
 
     // --- Chaining ---------------------------------------------------------
@@ -167,5 +166,153 @@ public sealed class StepTests
         await (context | (new AsyncStep(Flow.SetText("#q", "ozone")) | Flow.Click("#go")));
 
         Assert.AreEqual("searched ozone", await context.Title());
+    }
+
+    // --- Step 5 fixes -----------------------------------------------------
+
+    [TestMethod]
+    public async Task DblClick_SendsOnlyTheClicksOfOneDoubleClick()
+    {
+        await using var context = await TestContexts.WithHtml(
+            """<div id="d" onclick="window.clicks = (window.clicks || 0) + 1" ondblclick="window.dbl = (window.dbl || 0) + 1">x</div>""");
+
+        await (context | Flow.DblClick("#d"));
+
+        Assert.AreEqual(2, await context.Page.EvaluateAsync<int>("() => window.clicks"));
+        Assert.AreEqual(1, await context.Page.EvaluateAsync<int>("() => window.dbl"));
+    }
+
+    [TestMethod]
+    public async Task SetText_SelectsOptionByLabel()
+    {
+        await using var context = await TestContexts.WithHtml(
+            """<select id="s"><option value="a">Apple</option><option value="b">Banana</option></select>""");
+
+        var select = await Flow.SetText("#s", "Banana")(context);
+
+        Assert.AreEqual("b", await select.TextAsync());
+    }
+
+    [TestMethod]
+    public async Task Script_WhenScriptThrows_WrapsErrorInOzoneException()
+    {
+        await using var context = await TestContexts.WithHtml("<p>x</p>");
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.Script("() => { throw new Error('boom'); }")(context));
+
+        Assert.IsInstanceOfType<Microsoft.Playwright.PlaywrightException>(x.InnerException);
+    }
+
+    [TestMethod]
+    public async Task AssertAttributeValue_WhenElementIsGone_WrapsTimeoutInOzoneException()
+    {
+        await using var context = await TestContexts.WithHtml("""<a id="l" href="/x">x</a>""");
+        var link = await Flow.Find("#l")(context);
+        await context.Page.EvaluateAsync("() => document.getElementById('l').remove()");
+        context.Page.SetDefaultTimeout(300);
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.AssertAttributeValue("href", "/x")(link));
+
+        Assert.IsInstanceOfType<TimeoutException>(x.InnerException);
+    }
+
+    // --- FollowLink -------------------------------------------------------
+
+    /// <summary>Serves http://ozone.test/{name} as a page titled after the name.</summary>
+    static Task ServeTestSite(Context context) =>
+        context.Page.Context.RouteAsync("http://ozone.test/**", route => route.FulfillAsync(new()
+        {
+            ContentType = "text/html",
+            Body = $"<title>{route.Request.Url.Split('/')[^1]}</title><p id='p'>arrived</p>",
+        }));
+
+    [TestMethod]
+    public async Task FollowLink_NavigatesAndReturnsContextOnTargetPage()
+    {
+        await using var context = await TestContexts.WithHtml("""<a id="l" href="http://ozone.test/next">next</a>""");
+        await ServeTestSite(context);
+
+        var target = await Flow.FollowLink("#l", "next")(context);
+
+        Assert.IsNull(target.Element);
+        Assert.AreEqual("arrived", await (await Flow.Find("#p")(target)).TextAsync());
+    }
+
+    [TestMethod]
+    public async Task FollowLink_WhenLinkOpensNewWindow_ContinuesInIt()
+    {
+        await using var context = await TestContexts.WithHtml("""<title>start</title><a id="l" href="http://ozone.test/popup" target="_blank">next</a>""");
+        await ServeTestSite(context);
+
+        var target = await Flow.FollowLink("#l", "popup")(context);
+
+        Assert.AreNotSame(context.Page, target.Page);
+        Assert.AreEqual("popup", await target.Title());
+        Assert.AreEqual("start", await context.Title());
+    }
+
+    [TestMethod]
+    public async Task FollowLink_WaitsForTitleToChange()
+    {
+        await using var context = await TestContexts.WithHtml(
+            """<a id="l" href="#" onclick="setTimeout(() => document.title = 'Later', 300)">next</a>""");
+
+        await Flow.FollowLink("#l", "Later")(context);
+    }
+
+    [TestMethod]
+    public async Task FollowLink_WhenTitleDiffers_ReportsActualTitle()
+    {
+        await using var context = await TestContexts.WithHtml(
+            """<a id="l" href="#" onclick="document.title='Other'">next</a>""");
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.FollowLink("#l", "Next page")(context));
+
+        StringAssert.Contains(x.Message, "expected title 'Next page', actual 'Other'");
+    }
+
+    // --- Frames -----------------------------------------------------------
+
+    const string FrameHtml = """
+        <p id="where">page</p>
+        <iframe id="outer" srcdoc="<p id='where'>outer</p><iframe id='inner' srcdoc=&quot;<p id='where'>inner</p>&quot;></iframe>"></iframe>
+        """;
+
+    static async Task<string?> WhereAmI(Context context) => await (await Flow.Find("#where")(context)).TextAsync();
+
+    [TestMethod]
+    public async Task EnterFrame_FindsInsideFrameAndExitFrameReturnsToPage()
+    {
+        await using var context = await TestContexts.WithHtml(FrameHtml);
+
+        var outer = await Flow.EnterFrame("#outer")(context);
+        var back = await Flow.ExitFrame(outer);
+
+        Assert.AreEqual("outer", await WhereAmI(outer));
+        Assert.IsNull(back.Frame);
+        Assert.AreEqual("page", await WhereAmI(back));
+    }
+
+    [TestMethod]
+    public async Task EnterFrame_SupportsNestedFrames()
+    {
+        await using var context = await TestContexts.WithHtml(FrameHtml);
+
+        var outer = await Flow.EnterFrame("#outer")(context);
+        var inner = await Flow.EnterFrame("#inner")(outer);
+        var backToOuter = await Flow.ExitFrame(inner);
+
+        Assert.AreEqual("inner", await WhereAmI(inner));
+        Assert.AreEqual("outer", await WhereAmI(backToOuter));
+    }
+
+    [TestMethod]
+    public async Task EnterFrame_OnNonFrameElement_ThrowsOzoneException()
+    {
+        await using var context = await TestContexts.WithHtml(FrameHtml);
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.EnterFrame("#where")(context));
+
+        StringAssert.Contains(x.Message, "is not a frame");
     }
 }

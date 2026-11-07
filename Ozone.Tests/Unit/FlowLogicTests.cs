@@ -98,19 +98,15 @@ public sealed class FlowLogicTests
     }
 
     [TestMethod]
-    public async Task Retry_WithZeroAttempts_StillTriesOnce()
+    public async Task Retry_WithZeroAttempts_Throws()
     {
-        int attempts = 0;
-
-        await Flow.Retry(() => { attempts++; return Task.FromResult(true); }, maxAttempts: 0);
-
-        Assert.AreEqual(1, attempts);
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() => Flow.Retry(() => Task.FromResult(true), maxAttempts: 0));
     }
 
     [TestMethod]
     public async Task Retry_WithNullDelegate_Throws()
     {
-        await Assert.ThrowsExactlyAsync<ArgumentNullException>(() => Flow.Retry(null!));
+        await Assert.ThrowsExactlyAsync<ArgumentNullException>(() => Flow.Retry((Func<Task<bool>>)null!));
     }
 
     // --- Use --------------------------------------------------------------
@@ -233,5 +229,150 @@ public sealed class FlowLogicTests
     public async Task CreateContext_WithNullUrl_ThrowsArgumentNullException()
     {
         await Assert.ThrowsExactlyAsync<ArgumentNullException>(() => Flow.CreateContext(BrowserBrand.Chromium, null!));
+    }
+
+    // --- Step 5: every failure is an OzoneException --------------------------
+
+    static Task<bool> Boom(Context _) => throw new InvalidOperationException("boom");
+
+    public static IEnumerable<object[]> StepsWhoseDelegatesThrow =>
+    [
+        ["If condition", Flow.If(Boom, Mark)],
+        ["If step", Flow.If(_ => Task.FromResult(true), _ => throw new InvalidOperationException("boom"))],
+        ["While condition", Flow.While(Boom, Mark)],
+        ["Use action", Flow.Use(Mark, _ => throw new InvalidOperationException("boom"))],
+        ["Assertion predicate", Flow.Assertion(_ => throw new InvalidOperationException("boom"), "unused")],
+        ["AssertAsync predicate", Flow.AssertAsync(Boom, "unused")],
+        ["CreateProblem factory", Flow.CreateProblem((Func<Context, object>)(_ => throw new InvalidOperationException("boom")))],
+    ];
+
+    [TestMethod]
+    [DynamicData(nameof(StepsWhoseDelegatesThrow))]
+    public async Task Step_WhenDelegateThrows_WrapsItInOzoneException(string name, Func<Context, Task<Context>> step)
+    {
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => step(TestContexts.Detached()), name);
+
+        Assert.IsInstanceOfType<InvalidOperationException>(x.InnerException, name);
+    }
+
+    public static IEnumerable<object[]> StepsFailingOnPrecondition =>
+    [
+        ["Click", (Func<Context, Task<Context>>)Flow.Click],
+        ["DblClick", (Func<Context, Task<Context>>)Flow.DblClick],
+        ["PressEnter", (Func<Context, Task<Context>>)Flow.PressEnter],
+        ["SetText", Flow.SetText("x")],
+        ["AssertAttributeValue", Flow.AssertAttributeValue("id", "x")],
+        ["FirstContainingText", Flow.FirstContainingText("a")],
+        ["ExitFrame", (Func<Context, Task<Context>>)Flow.ExitFrame],
+        ["Use", Flow.Use(Mark, null!)],
+        ["CreateProblem", Flow.CreateProblem("x")],
+    ];
+
+    [TestMethod]
+    [DynamicData(nameof(StepsFailingOnPrecondition))]
+    public void Step_WhenPreconditionFails_ReturnsFaultedTaskInsteadOfThrowing(string name, Func<Context, Task<Context>> step)
+    {
+        var task = step(TestContexts.Detached());
+
+        Assert.IsTrue(task.IsFaulted, name);
+        Assert.IsInstanceOfType<OzoneException>(task.Exception!.InnerException, name);
+    }
+
+    [TestMethod]
+    public async Task ExitFrame_OutsideFrame_ThrowsOzoneException()
+    {
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.ExitFrame(TestContexts.Detached()));
+
+        StringAssert.Contains(x.Message, "not inside a frame");
+    }
+
+    // --- While limits -----------------------------------------------------
+
+    [TestMethod]
+    public async Task While_WhenConditionNeverTurnsFalse_FailsAfterMaxIterations()
+    {
+        int runs = 0;
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() =>
+            Flow.While(_ => Task.FromResult(true), c => { runs++; return Task.FromResult(c); }, maxIterations: 5)(TestContexts.Detached()));
+
+        Assert.AreEqual(5, runs);
+        StringAssert.Contains(x.Message, "after 5 iteration(s)");
+    }
+
+    [TestMethod]
+    public async Task While_WhenConditionTurnsFalseAtLimit_Succeeds()
+    {
+        int runs = 0;
+
+        await Flow.While(_ => Task.FromResult(runs < 5), c => { runs++; return Task.FromResult(c); }, maxIterations: 5)(TestContexts.Detached());
+
+        Assert.AreEqual(5, runs);
+    }
+
+    [TestMethod]
+    public async Task While_WithAsyncStep_HonorsMaxIterations()
+    {
+        var chain = new AsyncStep(c => Task.FromResult(c));
+
+        await Assert.ThrowsExactlyAsync<OzoneException>(() =>
+            Flow.While(_ => Task.FromResult(true), chain, maxIterations: 3)(TestContexts.Detached()));
+    }
+
+    [TestMethod]
+    public void While_WithNonPositiveMaxIterations_Throws()
+    {
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => Flow.While(_ => Task.FromResult(false), Mark, maxIterations: 0));
+    }
+
+    // --- Retry ------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Retry_DoesNotWaitAfterLastFailedAttempt()
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        Assert.IsFalse(await Flow.Retry(() => Task.FromResult(false), maxAttempts: 1));
+
+        Assert.IsLessThan(TimeSpan.FromMilliseconds(150), watch.Elapsed);
+    }
+
+    [TestMethod]
+    public async Task RetryStep_WhenLaterAttemptSucceeds_ReturnsItsResult()
+    {
+        var context = TestContexts.Detached();
+        var success = context.EmptyContext();
+        var seen = new List<Context>();
+
+        var result = await Flow.Retry(c =>
+        {
+            seen.Add(c);
+            return seen.Count < 2 ? throw new InvalidOperationException("not yet") : Task.FromResult(success);
+        }, maxAttempts: 3)(context);
+
+        Assert.AreSame(success, result);
+        Assert.HasCount(2, seen);
+        Assert.IsTrue(seen.All(c => c == context), "every attempt starts from the same context");
+    }
+
+    [TestMethod]
+    public async Task RetryStep_WhenAllAttemptsFail_RaisesLastFailure()
+    {
+        int attempts = 0;
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.Retry(_ =>
+        {
+            attempts++;
+            throw new InvalidOperationException($"attempt {attempts}");
+        }, maxAttempts: 2)(TestContexts.Detached()));
+
+        Assert.AreEqual(2, attempts);
+        Assert.AreEqual("attempt 2", x.InnerException?.Message);
+    }
+
+    [TestMethod]
+    public void RetryStep_WithNonPositiveMaxAttempts_Throws()
+    {
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => Flow.Retry(Mark, maxAttempts: 0));
     }
 }

@@ -11,7 +11,7 @@ namespace Ozone
         /// <summary>
         /// Appends text, preceded by ", " unless the builder is empty.
         /// </summary>
-        public static StringBuilder AppendWithComma(this StringBuilder sb, string text)
+        internal static StringBuilder AppendWithComma(this StringBuilder sb, string text)
         {
             if (sb.Length > 0)
             {
@@ -55,13 +55,6 @@ namespace Ozone
                 return false;
             }
         }
-
-        /// <summary>
-        /// Returns the value of the named attribute, or null if it is not set.
-        /// </summary>
-        public async static Task<string?> GetAttribute(this ILocator locator, string attributName) =>
-            await locator.GetAttributeAsync(attributName);
-
     }
 }
 

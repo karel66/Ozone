@@ -102,12 +102,11 @@ public sealed class ContextTests
     }
 
     [TestMethod]
-    public async Task Text_WithoutElement_ReturnsNull()
+    public async Task TextAsync_WithoutElement_ReturnsNull()
     {
         var context = TestContexts.Detached();
 
-        Assert.IsNull(await context.Text);
-        Assert.IsNull(await context.Value());
+        Assert.IsNull(await context.TextAsync());
     }
 
     [TestMethod]

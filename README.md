@@ -48,7 +48,8 @@ or chained with `AsyncStep` and the `|` operator as shown above.
 | Find inside the current element | `RelativeFind`, `RelativeFindAll`, `RelativeFindOnXPath`, `RelativeFindAllOnXPath` |
 | Pick from a collection | `FirstContainingText`, `LastContainingText`, `FirstContainingContextItem`, `LastContainingContextItem` |
 | Actions | `Click`, `DblClick`, `SetText`, `PressEnter`, `FollowLink`, `Script` |
-| Control flow and checks | `If`, `While`, `Retry`, `Assertion`, `AssertAsync`, `AssertAttributeValue` |
+| Frames | `EnterFrame`, `ExitFrame` |
+| Control flow and checks | `If`, `While` (stops with an error after 1000 iterations by default), `Retry`, `Assertion`, `AssertAsync`, `AssertAttributeValue` |
 
 Finders wait up to 10 seconds for the first match. Use `context.WithFindTimeout(TimeSpan.FromSeconds(30))` to change this for a context and every context derived from it. A negative index counts from the end (`-1` is the last match).
 
