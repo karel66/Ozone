@@ -16,6 +16,10 @@ namespace Ozone
         /// </summary>
         public Context? Context => _context;
 
+        /// <summary>
+        /// Wraps a step so it can be chained with <c>
+        /// </c>.
+        /// </summary>
         public AsyncStep(Func<Context, Task<Context>> step)
         {
             _step = step;

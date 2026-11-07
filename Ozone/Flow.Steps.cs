@@ -46,6 +46,9 @@ namespace Ozone
                 return current;
             };
 
+        /// <summary>
+        /// Executes the step chain while the condition returns true.
+        /// </summary>
         public static Func<Context, Task<Context>> While(Func<Context, Task<bool>> condition, AsyncStep step) =>
             async context =>
             {
@@ -297,6 +300,9 @@ namespace Ozone
             };
 
 
+        /// <summary>
+        /// Selects the first element in the context Collection whose text contains the given text.
+        /// </summary>
         public static Func<Context, Task<Context>> FirstContainingText(string text) =>
            async context =>
            {
@@ -318,6 +324,9 @@ namespace Ozone
                return context.CreateProblem($"Text '{text}' not found in the context collection."); ;
            };
 
+        /// <summary>
+        /// Selects the first element in the context Collection whose text contains the value stored in <see cref="Context.Items"/> under the given key.
+        /// </summary>
         public static Func<Context, Task<Context>> FirstContainingContextItem(string contextKey) =>
           async context =>
           {
@@ -376,6 +385,9 @@ namespace Ozone
                 return context.CreateProblem($"Text '{text}' not found in the context collection."); ;
             };
 
+        /// <summary>
+        /// Selects the last element in the context Collection whose text contains the value stored in <see cref="Context.Items"/> under the given key.
+        /// </summary>
         public static Func<Context, Task<Context>> LastContainingContextItem(string contextKey) =>
            async context =>
            {
@@ -409,6 +421,9 @@ namespace Ozone
                return context.CreateProblem($"Text '{text}' not found in the context collection."); ;
            };
 
+        /// <summary>
+        /// Fails unless the context element's attribute has the expected value.
+        /// </summary>
         public static Func<Context, Task<Context>> AssertAttributeValue(string attributeName, string expected) =>
             async context =>
             {
@@ -425,25 +440,46 @@ namespace Ozone
                     context : context.CreateProblem($"Expected {attributeName}='{expected}', actual {attributeName}='{actual}'");
             };
 
+        /// <summary>
+        /// Fails with the given message unless the predicate holds for the context.
+        /// </summary>
         public static Func<Context, Task<Context>> Assertion(Predicate<Context> predicate, string errorMessage) =>
             async context => predicate(context) ? context : context.CreateProblem(errorMessage);
 
+        /// <summary>
+        /// Fails with a message built from the context unless the predicate holds.
+        /// </summary>
         public static Func<Context, Task<Context>> Assertion(Predicate<Context> predicate, Func<Context, string> errorMessage) =>
             async context => predicate(context) ? context : context.CreateProblem(errorMessage(context));
 
+        /// <summary>
+        /// Fails with the given message unless the async predicate returns true.
+        /// </summary>
         public static Func<Context, Task<Context>> AssertAsync(Func<Context, Task<bool>> predicate, string errorMessage) =>
             async context => await predicate(context) ? context : context.CreateProblem(errorMessage);
 
+        /// <summary>
+        /// Fails with a message built from the context unless the async predicate returns true.
+        /// </summary>
         public static Func<Context, Task<Context>> AssertAsync(Func<Context, Task<bool>> predicate, Func<Context, Task<string>> errorMessage) =>
             async context => await predicate(context) ? context : context.CreateProblem(await errorMessage(context));
 
 
+        /// <summary>
+        /// Step that always fails with the given problem (see <see cref="Context.CreateProblem(object)"/>).
+        /// </summary>
         public static Func<Context, Task<Context>> CreateProblem(object problem) =>
             async context => context.CreateProblem(problem);
 
+        /// <summary>
+        /// Step that always fails with the problem produced by the task.
+        /// </summary>
         public static Func<Context, Task<Context>> CreateProblem(Task<object> problem) =>
             async context => context.CreateProblem(await problem);
 
+        /// <summary>
+        /// Step that always fails with a problem built from the context.
+        /// </summary>
         public static Func<Context, Task<Context>> CreateProblem(Func<Context, object> problem) =>
             async context => context.CreateProblem(problem(context));
     }

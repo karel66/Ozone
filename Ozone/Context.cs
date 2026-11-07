@@ -246,6 +246,9 @@ namespace Ozone
             GC.SuppressFinalize(this);
         }
 
+        /// <summary>
+        /// Converts the context to its <see cref="object.ToString"/> value.
+        /// </summary>
         public static implicit operator string?(Context c) => c.ToString();
     }
 }

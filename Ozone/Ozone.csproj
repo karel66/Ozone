@@ -5,6 +5,21 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Platforms>AnyCPU</Platforms>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Package">
+    <PackageId>Ozone</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Karel Rimm</Authors>
+    <Description>Functional DSL for composing Microsoft Playwright UI automation flows from small async steps.</Description>
+    <PackageTags>playwright;ui-testing;automation;browser;dsl</PackageTags>
+    <PackageProjectUrl>https://github.com/karel66/Ozone</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/karel66/Ozone</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
   <ItemGroup>

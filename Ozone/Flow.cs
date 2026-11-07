@@ -12,6 +12,9 @@ namespace Ozone
         /// </summary>
         static readonly LocatorWaitForOptions FindTimeout = WaitSeconds(10);
 
+        /// <summary>
+        /// Allows deriving flow classes that group steps for an application.
+        /// </summary>
         protected Flow() { }
 
         /// <summary>
