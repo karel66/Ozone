@@ -1,4 +1,4 @@
-﻿using Microsoft.Playwright;
+using Microsoft.Playwright;
 
 namespace Ozone
 {
@@ -13,7 +13,7 @@ namespace Ozone
         public static Func<Context, Task<Context>> Find(string selector, int index = 0) =>
             async context =>
             {
-                if (context.Page == null)
+                if(context.Page == null)
                 {
                     return context.CreateProblem($"{nameof(Find)}: Missing Page");
                 }
@@ -26,19 +26,19 @@ namespace Ozone
 
                     int count = await locator.CountAsync();
 
-                    if (count == 0)
+                    if(count == 0)
                     {
                         return context.CreateProblem($"{nameof(Find)}: '{selector}' not found");
                     }
 
-                    if (index == 0)
+                    if(index == 0)
                     {
                         return context.NextElement(locator.First);
                     }
 
                     int idx = index < 0 ? count - 1 : index;
 
-                    if (idx < 0 || idx >= count)
+                    if(idx < 0 || idx >= count)
                     {
                         return context.CreateProblem($"{nameof(Find)}: index {index} out of range (0..{count - 1})");
                     }
@@ -46,7 +46,7 @@ namespace Ozone
                     return context.NextElement(locator.Nth(idx));
                 }
 
-                catch (TimeoutException)
+                catch(TimeoutException)
                 {
                     return context.CreateProblem($"{nameof(Find)}: '{selector}' not found");
                 }
@@ -63,7 +63,7 @@ namespace Ozone
         public static Func<Context, Task<Context>> FindAll(string selector) =>
             async context =>
             {
-                if (context.Page == null)
+                if(context.Page == null)
                 {
                     return context.CreateProblem($"{nameof(FindAll)}: Missing Page");
                 }
@@ -74,7 +74,7 @@ namespace Ozone
 
                 int count = await locator.CountAsync();
 
-                if (count == 0)
+                if(count == 0)
                 {
                     return context.CreateProblem($"{nameof(FindAll)}: '{selector}' not found");
                 }
@@ -90,32 +90,32 @@ namespace Ozone
         /// <summary>
         /// Find element by XPath from page/frame.
         /// </summary>
-        public static Func<Context, Task<Context>> FindOnXPath(string xpath, int index = 0) =>
+        public static Func<Context, Task<Context>> FindOnXPath(string xpath, int index = 0, float timeoutSeconds = 1.0f) =>
             async context =>
             {
-                if (context.Page == null)
+                if(context.Page == null)
                 {
                     return context.CreateProblem($"{nameof(FindOnXPath)}: Missing Page");
                 }
 
                 var locator = context.RootLocatorForXPath(xpath);
 
-                await locator.First.WaitForAsync(FindTimeout);
+                await locator.First.WaitForAsync(new() { Timeout = timeoutSeconds * 1000 });
 
                 int count = await locator.CountAsync();
 
-                if (count == 0)
+                if(count == 0)
                 {
                     return context.CreateProblem($"{nameof(FindOnXPath)}: '{xpath}' not found");
                 }
 
-                if (index == 0)
+                if(index == 0)
                 {
                     return context.NextElement(locator.First);
                 }
 
                 int idx = index < 0 ? count + index : index;
-                if (idx < 0 || idx >= count)
+                if(idx < 0 || idx >= count)
                 {
                     return context.CreateProblem($"{nameof(FindOnXPath)}: index {index} out of range (0..{count - 1})");
                 }
@@ -126,7 +126,7 @@ namespace Ozone
         public static Func<Context, Task<Context>> FindByText(string text) =>
             async context =>
             {
-                if (context.Page == null)
+                if(context.Page == null)
                 {
                     return context.CreateProblem($"{nameof(FindByText)}: Missing Page");
                 }
@@ -142,7 +142,7 @@ namespace Ozone
         public static Func<Context, Task<Context>> FindAllOnXPath(string xpath) =>
             async context =>
             {
-                if (context.Page == null)
+                if(context.Page == null)
                 {
                     return context.CreateProblem($"{nameof(FindAllOnXPath)}: Missing Page");
                 }
@@ -150,7 +150,7 @@ namespace Ozone
                 var locator = context.RootLocatorForXPath(xpath);
                 int count = await locator.CountAsync();
 
-                if (count <= 0)
+                if(count <= 0)
                 {
                     return context.CreateProblem($"{nameof(FindAllOnXPath)}: '{xpath}' not found");
                 }
@@ -166,7 +166,7 @@ namespace Ozone
         /// <summary>
         /// Find an element using CSS selector, otherwise returns null.
         /// </summary>
-        public async static Task<Context?> Exists(Context context, string selector, float timeoutSeconds = 1.0f)
+        public async static Task<Context?> Exists(Context context, string selector, float timeoutSeconds)
         {
             try
             {
@@ -176,7 +176,7 @@ namespace Ozone
 
                 var count = await locator.CountAsync();
 
-                if (count > 0)
+                if(count > 0)
                 {
                     return context.NextElement(locator.First);
                 }
@@ -184,7 +184,7 @@ namespace Ozone
                 Log($"Selector {selector} does not exist.");
                 return null;
             }
-            catch (TimeoutException)
+            catch(TimeoutException)
             {
                 Log($"Selector {selector} does not exist.");
                 return null;
@@ -197,10 +197,11 @@ namespace Ozone
             try
             {
                 var locator = context.RootLocatorForXPath(xpath);
-                await locator.First.WaitForAsync(FiveSecTimeout);
-                return await locator.CountAsync() > 0;
+                await locator.First.WaitForAsync(new() { Timeout = timeoutSeconds * 1000 });
+                int matches = await locator.CountAsync();
+                return matches > 0;
             }
-            catch (TimeoutException)
+            catch(TimeoutException)
             {
                 Log($"{xpath} not found");
                 return false;
@@ -215,17 +216,18 @@ namespace Ozone
             {
                 var c = await Exists(context, selector, waitSeconds);
 
-                if (c != null && onTrue != null)
+                if(c != null && onTrue != null)
                 {
                     return await onTrue(c);
                 }
 
-                if (c == null && onFalse != null)
+                if(c == null && onFalse != null)
                 {
                     return await onFalse(context);
                 }
 
                 return context;
             };
+
     }
 }
