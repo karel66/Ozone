@@ -1,4 +1,4 @@
-﻿using Microsoft.Playwright;
+using Microsoft.Playwright;
 
 namespace Ozone
 {
@@ -31,7 +31,7 @@ namespace Ozone
                 Headless = headless
             };
 
-            switch (browserBrand)
+            switch(browserBrand)
             {
                 case BrowserBrand.Chromium:
                 case BrowserBrand.Chrome:
@@ -59,12 +59,5 @@ namespace Ozone
             return new Context(playwright, browser, page, null, null, null, new());
         }
 
-        /// <summary>
-        /// Dispose resources used by the Playwright context.
-        /// </summary>
-        public async static Task Close(Context context)
-        {
-            await context.DisposeAsync();
-        }
     }
 }
