@@ -1,4 +1,4 @@
-﻿namespace Ozone
+namespace Ozone
 {
     /// <summary>
     /// Relative searches (current element context).
