@@ -8,11 +8,6 @@ namespace Ozone
     public partial class Flow
     {
         /// <summary>
-        /// How long finders wait for the first match to appear in the DOM.
-        /// </summary>
-        static readonly LocatorWaitForOptions FindTimeout = WaitSeconds(10);
-
-        /// <summary>
         /// Allows deriving flow classes that group steps for an application.
         /// </summary>
         protected Flow() { }

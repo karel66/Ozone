@@ -58,7 +58,6 @@ public sealed class FinderTests
     {
         await using var context = await TestContexts.WithHtml(Html);
 
-        // Waits for the 10 s find timeout before failing.
         var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.Find("#missing")(context));
 
         StringAssert.Contains(x.Message, "'#missing' not found");
@@ -286,5 +285,44 @@ public sealed class FinderTests
         var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.Find("li.item", -4)(context));
 
         StringAssert.Contains(x.Message, "index -4 out of range");
+    }
+
+    // --- Find timeout ------------------------------------------------------
+
+    [TestMethod]
+    public async Task Find_WhenNothingMatches_FailsAfterContextFindTimeout()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+        var fast = context.WithFindTimeout(TimeSpan.FromMilliseconds(300));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.Find("#missing")(fast));
+
+        Assert.IsGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(250), watch.Elapsed);
+        Assert.IsLessThan(TimeSpan.FromSeconds(3), watch.Elapsed, "should not wait for the 10 s default");
+    }
+
+    [TestMethod]
+    public async Task Find_WaitsUpToContextFindTimeout()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+        await context.Page.EvaluateAsync(
+            "() => setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<i id=\"slow\">slow</i>'), 1500)");
+
+        var patient = context.WithFindTimeout(TimeSpan.FromSeconds(5));
+
+        Assert.AreEqual("slow", await TextOf(Flow.Find("#slow")(patient)));
+    }
+
+    [TestMethod]
+    public async Task RelativeFind_UsesFindTimeoutCarriedFromParentContext()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+        var other = await Flow.Find("#other")(context.WithFindTimeout(TimeSpan.FromMilliseconds(300)));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.RelativeFind("li")(other));
+
+        Assert.IsLessThan(TimeSpan.FromSeconds(3), watch.Elapsed);
     }
 }

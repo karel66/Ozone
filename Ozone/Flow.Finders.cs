@@ -67,7 +67,9 @@ namespace Ozone
             return await locator.CountAsync();
         }
 
-        static LocatorWaitForOptions WaitSeconds(float seconds) =>
-            new() { Timeout = seconds * 1000, State = WaitForSelectorState.Attached };
+        static LocatorWaitForOptions WaitSeconds(float seconds) => WaitFor(TimeSpan.FromSeconds(seconds));
+
+        static LocatorWaitForOptions WaitFor(TimeSpan timeout) =>
+            new() { Timeout = (float)timeout.TotalMilliseconds, State = WaitForSelectorState.Attached };
     }
 }

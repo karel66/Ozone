@@ -12,7 +12,7 @@ namespace Ozone
         /// A negative index counts from the end (-1 is the last match).
         /// </summary>
         public static Func<Context, Task<Context>> Find(string selector, int index = 0) =>
-            async context => await SelectOne(context, nameof(Find), selector, context.RootLocatorForSelector(selector), index, FindTimeout);
+            async context => await SelectOne(context, nameof(Find), selector, context.RootLocatorForSelector(selector), index, WaitFor(context.FindTimeout));
 
         /// <summary>
         /// Find last element by selector.
@@ -23,7 +23,7 @@ namespace Ozone
         /// Find all elements by CSS selector.
         /// </summary>
         public static Func<Context, Task<Context>> FindAll(string selector) =>
-            async context => await SelectAll(context, nameof(FindAll), selector, context.RootLocatorForSelector(selector), FindTimeout);
+            async context => await SelectAll(context, nameof(FindAll), selector, context.RootLocatorForSelector(selector), WaitFor(context.FindTimeout));
 
         /// <summary>
         /// Find element by XPath from page/frame.
@@ -36,13 +36,13 @@ namespace Ozone
         /// Find the first element containing the given text from page/frame.
         /// </summary>
         public static Func<Context, Task<Context>> FindByText(string text) =>
-            async context => await SelectOne(context, nameof(FindByText), text, context.RootLocatorForText(text), 0, FindTimeout);
+            async context => await SelectOne(context, nameof(FindByText), text, context.RootLocatorForText(text), 0, WaitFor(context.FindTimeout));
 
         /// <summary>
         /// Find all elements by XPath from page/frame.
         /// </summary>
         public static Func<Context, Task<Context>> FindAllOnXPath(string xpath) =>
-            async context => await SelectAll(context, nameof(FindAllOnXPath), xpath, context.RootLocatorForXPath(xpath), FindTimeout);
+            async context => await SelectAll(context, nameof(FindAllOnXPath), xpath, context.RootLocatorForXPath(xpath), WaitFor(context.FindTimeout));
 
         /// <summary>
         /// Find an element using CSS selector, otherwise returns null.

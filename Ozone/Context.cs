@@ -47,6 +47,17 @@ namespace Ozone
         /// </summary>
         public ConcurrentDictionary<string, string> Items { get; }
 
+        /// <summary>
+        /// Default time finders wait for the first match to appear.
+        /// </summary>
+        public static readonly TimeSpan DefaultFindTimeout = TimeSpan.FromSeconds(10);
+
+        /// <summary>
+        /// How long finders wait for the first match before reporting it as not found.
+        /// Carried over to every context derived from this one. See <see cref="WithFindTimeout"/>.
+        /// </summary>
+        public TimeSpan FindTimeout { get; }
+
         internal Context(
             IPlaywright playwright,
             IBrowser browser,
@@ -54,7 +65,9 @@ namespace Ozone
             IFrame? frame,
             ILocator? element,
             IReadOnlyList<ILocator>? collection,
-            ConcurrentDictionary<string, string> items)
+            ConcurrentDictionary<string, string> items,
+            TimeSpan? findTimeout = null,
+            bool ownsBrowser = true)
         {
 
             Playwright = playwright;
@@ -64,6 +77,8 @@ namespace Ozone
             Element = element;
             Collection = collection;
             Items = items ?? new();
+            FindTimeout = findTimeout ?? DefaultFindTimeout;
+            OwnsBrowser = ownsBrowser;
         }
 
         /// <summary>
@@ -134,25 +149,36 @@ namespace Ozone
         /// Returns context without Element or Collection.
         /// </summary>
         public Context EmptyContext() =>
-            new(Playwright, Browser, Page, Frame, null, null, Items);
+            new(Playwright, Browser, Page, Frame, null, null, Items, FindTimeout, OwnsBrowser);
+
+        /// <summary>
+        /// Returns this context with a different finder timeout. Steps run on the returned
+        /// context, and contexts derived from it, use the new timeout.
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">The timeout is zero or negative.</exception>
+        public Context WithFindTimeout(TimeSpan timeout)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
+            return new(Playwright, Browser, Page, Frame, Element, Collection, Items, timeout, OwnsBrowser);
+        }
 
         /// <summary>
         /// Set context Element.
         /// </summary>
         internal Context NextElement(ILocator element) =>
-            new(Playwright, Browser, Page, Frame, element, null, Items);
+            new(Playwright, Browser, Page, Frame, element, null, Items, FindTimeout, OwnsBrowser);
 
         /// <summary>
         /// Set context Frame.
         /// </summary>
         internal Context NextFrame(IFrame frame) =>
-            new(Playwright, Browser, Page, frame, null, null, Items);
+            new(Playwright, Browser, Page, frame, null, null, Items, FindTimeout, OwnsBrowser);
 
         /// <summary>
         /// Set context Collection.
         /// </summary>
         internal Context NextCollection(IReadOnlyList<ILocator> collection) =>
-            new(Playwright, Browser, Page, Frame, null, collection, Items);
+            new(Playwright, Browser, Page, Frame, null, collection, Items, FindTimeout, OwnsBrowser);
 
 
         /// <summary>
@@ -210,6 +236,13 @@ namespace Ozone
             }
         }
 
+        /// <summary>
+        /// True when disposing this context closes the browser and Playwright (contexts from
+        /// <see cref="Flow.CreateContext"/>). False when the browser is shared, e.g. by tests;
+        /// disposing then closes only this page's browser context.
+        /// </summary>
+        internal bool OwnsBrowser { get; }
+
         bool _disposed = false;
 
         /// <summary>
@@ -226,6 +259,12 @@ namespace Ozone
 
             _disposed = true;
             Trace.TraceInformation("Context: DisposeAsync()");
+
+            if(!OwnsBrowser)
+            {
+                await Page.Context.CloseAsync();
+                return;
+            }
 
             try
             {

@@ -109,4 +109,45 @@ public sealed class ContextTests
         Assert.IsNull(await context.Text);
         Assert.IsNull(await context.Value());
     }
+
+    [TestMethod]
+    public void FindTimeout_DefaultsToTenSeconds()
+    {
+        Assert.AreEqual(TimeSpan.FromSeconds(10), TestContexts.Detached().FindTimeout);
+        Assert.AreEqual(Context.DefaultFindTimeout, TestContexts.Detached().FindTimeout);
+    }
+
+    [TestMethod]
+    public void WithFindTimeout_KeepsStateAndSharesItems()
+    {
+        var context = TestContexts.Detached([]);
+
+        var fast = context.WithFindTimeout(TimeSpan.FromMilliseconds(250));
+        fast.Items["k"] = "v";
+
+        Assert.AreEqual(TimeSpan.FromMilliseconds(250), fast.FindTimeout);
+        Assert.AreSame(context.Collection, fast.Collection);
+        Assert.AreEqual("v", context.Items["k"]);
+        Assert.AreEqual(Context.DefaultFindTimeout, context.FindTimeout, "original context is unchanged");
+    }
+
+    [TestMethod]
+    public void WithFindTimeout_IsCarriedToDerivedContexts()
+    {
+        var fast = TestContexts.Detached().WithFindTimeout(TimeSpan.FromSeconds(2));
+
+        Assert.AreEqual(TimeSpan.FromSeconds(2), fast.EmptyContext().FindTimeout);
+        Assert.AreEqual(TimeSpan.FromSeconds(2), fast.NextElement(null!).FindTimeout);
+        Assert.AreEqual(TimeSpan.FromSeconds(2), fast.NextCollection([]).FindTimeout);
+        Assert.AreEqual(TimeSpan.FromSeconds(2), fast.NextFrame(null!).FindTimeout);
+    }
+
+    [TestMethod]
+    [DataRow(0)]
+    [DataRow(-1)]
+    public void WithFindTimeout_RejectsNonPositiveTimeout(int milliseconds)
+    {
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
+            () => TestContexts.Detached().WithFindTimeout(TimeSpan.FromMilliseconds(milliseconds)));
+    }
 }

@@ -33,7 +33,7 @@ public sealed class LifecycleTests
     [TestMethod]
     public async Task DisposeAsync_ClosesBrowserAndIsIdempotent()
     {
-        var context = await TestContexts.WithHtml("<p>x</p>");
+        var context = await Flow.CreateContext(BrowserBrand.Chromium, new Uri("about:blank"));
 
         await context.DisposeAsync();
         await context.DisposeAsync();
@@ -52,5 +52,17 @@ public sealed class LifecycleTests
 
         Assert.AreEqual("v", context.Items["k"]);
         Assert.AreSame(context.Page, derived.Page);
+    }
+
+    [TestMethod]
+    public async Task DisposeAsync_OfContextOnSharedBrowser_ClosesOnlyItsPage()
+    {
+        var context = await TestContexts.WithHtml("<p>x</p>");
+        var derived = context.EmptyContext();
+
+        await derived.DisposeAsync();
+
+        Assert.IsTrue(context.Page.IsClosed);
+        Assert.IsTrue(context.Browser.IsConnected);
     }
 }

@@ -50,7 +50,7 @@ or chained with `AsyncStep` and the `|` operator as shown above.
 | Actions | `Click`, `DblClick`, `SetText`, `PressEnter`, `FollowLink`, `Script` |
 | Control flow and checks | `If`, `While`, `Retry`, `Assertion`, `AssertAsync`, `AssertAttributeValue` |
 
-Finders wait up to 10 seconds for the first match. A negative index counts from the end (`-1` is the last match).
+Finders wait up to 10 seconds for the first match. Use `context.WithFindTimeout(TimeSpan.FromSeconds(30))` to change this for a context and every context derived from it. A negative index counts from the end (`-1` is the last match).
 
 **Errors.** A failing step throws `OzoneException`. When the failure came from Playwright, the original exception is kept as `InnerException`.
 
