@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Ozone is a small .NET class library (`net10.0`, nullable enabled) that wraps **Microsoft Playwright** in a functional DSL for composing UI automation flows. The library project (`Ozone.csproj`) sits at the repo root; the MSTest project `Ozone.Tests/` sits in a subfolder and is excluded from the library's compile globs via `DefaultItemExcludes` in `Ozone.csproj` — keep that exclusion if you add more project folders under the root.
+Ozone is a small .NET class library (`net10.0`, nullable enabled) that wraps **Microsoft Playwright** in a functional DSL for composing UI automation flows. `Ozone.sln` at the repo root contains two projects in sibling folders: the library `Ozone/Ozone.csproj` and the MSTest project `Ozone.Tests/Ozone.Tests.csproj`. Source file paths below are relative to `Ozone/`.
 
 ## Commands
 
@@ -18,7 +18,7 @@ dotnet test Ozone.sln --filter "FullyQualifiedName~FinderTests.Find_WithIndex"  
 Tests are split into `Ozone.Tests/Unit` (no browser: they build a `Context` with null Playwright objects via `TestContexts.Detached()`, enabled by `InternalsVisibleTo`) and `Ozone.Tests/Browser` (`[TestCategory("Browser")]`, launch headless Chromium and load inline HTML via `TestContexts.WithHtml(...)`). Tests run in parallel at method level; tests that toggle global state such as `Flow.TraceSensitiveValues` must be marked `[DoNotParallelize]`. `[Ignore]`d tests in `FinderTests` document known bugs — remove the attribute when fixing them.
 
 To run browser tests or flows locally, the Playwright browsers must be installed once after building:
-`powershell bin/Debug/net10.0/playwright.ps1 install chromium` (Windows PowerShell 5.1 works; `pwsh` is not required). The browser revision is tied to the `Microsoft.Playwright` package version, so rerun this after upgrading the package.
+`powershell Ozone.Tests/bin/Debug/net10.0/playwright.ps1 install chromium` (Windows PowerShell 5.1 works; `pwsh` is not required). The browser revision is tied to the `Microsoft.Playwright` package version, so rerun this after upgrading the package.
 
 ## Architecture
 

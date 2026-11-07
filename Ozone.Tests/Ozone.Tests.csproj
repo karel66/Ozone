@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Ozone.csproj" />
+    <ProjectReference Include="..\Ozone\Ozone.csproj" />
   </ItemGroup>
 
 </Project>

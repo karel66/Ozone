@@ -5,8 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Platforms>AnyCPU</Platforms>
-    <!-- The test project lives in a subfolder of this project's directory; keep its sources out of the library. -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);Ozone.Tests/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

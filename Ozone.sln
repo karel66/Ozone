@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.14.36705.20
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ozone", "Ozone.csproj", "{717947F2-CF28-4753-9412-30C256D5F153}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ozone", "Ozone\Ozone.csproj", "{717947F2-CF28-4753-9412-30C256D5F153}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ozone.Tests", "Ozone.Tests\Ozone.Tests.csproj", "{2163793F-5C43-4D03-B263-196CD29E4FC5}"
 EndProject
