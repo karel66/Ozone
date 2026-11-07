@@ -2,6 +2,8 @@ using Microsoft.Playwright;
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 
 namespace Ozone
 {
@@ -151,15 +153,36 @@ namespace Ozone
 
 
         /// <summary>
-        /// Set problem.
+        /// Logs the problem and throws <see cref="OzoneException"/>. Never returns;
+        /// the <see cref="Context"/> return type only allows use in expressions such as
+        /// <c>return context.CreateProblem(...)</c>.
         /// </summary>
+        /// <remarks>
+        /// An <see cref="OzoneException"/> is rethrown unchanged; any other exception
+        /// becomes the inner exception so its type and stack trace are kept.
+        /// </remarks>
+        [DoesNotReturn]
         public Context CreateProblem(object problem)
         {
             problem ??= "Null passed as problem!";
+
+            switch(problem)
+            {
+                case OzoneException ozone:
+                    ExceptionDispatchInfo.Throw(ozone);
+                    break;
+
+                case Exception x:
+                    Flow.Log($"Problem created: {x.GetType().Name}: {x.Message}");
+                    throw new OzoneException(x.Message, x);
+            }
+
             Flow.Log($"Problem created: {problem}");
             throw new OzoneException(problem.ToString());
         }
 
+        /// <inheritdoc cref="CreateProblem(object)"/>
+        [DoesNotReturn]
         public Context CreateProblem(Func<Context, object> f) => CreateProblem(f(this));
 
 
@@ -186,15 +209,38 @@ namespace Ozone
 
         bool _disposed = false;
 
+        /// <summary>
+        /// Closes the page and browser and shuts down Playwright.
+        /// All contexts derived from the same CreateContext call share these resources,
+        /// so disposing any one of them disposes them for all.
+        /// </summary>
         public async ValueTask DisposeAsync()
         {
-            if(!_disposed)
+            if(_disposed)
             {
-                Trace.TraceInformation("Context: DisposeAsync()");
-                await Page.CloseAsync();
-                await Browser.CloseAsync();
-                _disposed = true;
+                return;
             }
+
+            _disposed = true;
+            Trace.TraceInformation("Context: DisposeAsync()");
+
+            try
+            {
+                await Page.CloseAsync();
+            }
+            finally
+            {
+                try
+                {
+                    await Browser.CloseAsync();
+                }
+                finally
+                {
+                    Playwright.Dispose();
+                }
+            }
+
+            GC.SuppressFinalize(this);
         }
 
         public static implicit operator string?(Context c) => c.ToString();

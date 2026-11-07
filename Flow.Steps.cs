@@ -384,9 +384,12 @@ namespace Ozone
                    return context.CreateProblem("Missing collection in context!");
                }
 
-               ILocator? last = null;
+               if (!context.Items.TryGetValue(contextKey, out string? text))
+               {
+                   return context.CreateProblem($"Context item '{contextKey}' not found!");
+               }
 
-               var text = context.Items[contextKey];
+               ILocator? last = null;
 
                foreach (var current in context.Collection)
                {

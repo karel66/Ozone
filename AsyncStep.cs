@@ -33,14 +33,7 @@ namespace Ozone
                 return null;
             }
 
-            var name = _step.Method.Name;
-
-            if (name[0] == '<')
-            {
-                name = name[1..name.IndexOf('>')];
-            }
-
-            return $"{name}({FormatTarget(_step.Target)})";
+            return $"{ExtractMethodName(_step.Method.Name)}({FormatTarget(_step.Target)})";
         }
 
         /// <summary>
@@ -114,64 +107,61 @@ namespace Ozone
             return first.Link(next);
         }
 
+        /// <summary>
+        /// Captured string arguments whose values are safe to log (locators, keys, labels).
+        /// Any other captured string — e.g. the text typed by SetText — is redacted,
+        /// because it may hold passwords, tokens or personal data.
+        /// </summary>
+        static readonly HashSet<string> LoggableStringFields = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "selector", "xpath", "attributeName", "contextKey", "targetTitle"
+        };
+
+        /// <summary>
+        /// Formats the closure's captured arguments for the trace log. By default only
+        /// allow-listed strings and primitive values are printed; other strings, chars and
+        /// arrays are redacted. <see cref="Flow.TraceSensitiveValues"/> prints them all.
+        /// Objects are always shown by type only.
+        /// </summary>
         static string FormatTarget(object? target)
         {
             StringBuilder args = new();
 
             if (target == null) return args.ToString();
 
-            Type type = target.GetType();
+            bool showAll = Flow.TraceSensitiveValues;
 
-            foreach (var field in type.GetFields())
+            foreach (var field in target.GetType().GetFields())
             {
                 object? argval = field.GetValue(target);
+                Type fieldType = field.FieldType;
 
                 if (argval == null)
                 {
                     args.AppendWithComma($"{field.Name}=null");
                 }
-                else if (field.FieldType == typeof(string))
+                else if (fieldType == typeof(string))
                 {
-                    args.AppendWithComma($"{field.Name}=\"{argval}\"");
+                    args.AppendWithComma(showAll || LoggableStringFields.Contains(field.Name)
+                        ? $"{field.Name}=\"{argval}\""
+                        : $"{field.Name}=***");
                 }
-                else if (field.FieldType == typeof(char))
+                else if (fieldType.IsPrimitive || fieldType.IsEnum)
                 {
-                    args.AppendWithComma($"{field.Name}='{argval}'");
+                    args.AppendWithComma(fieldType != typeof(char) ? $"{field.Name}={argval}"
+                        : showAll ? $"{field.Name}='{argval}'"
+                        : $"{field.Name}=***");
                 }
-                else if (field.FieldType.IsValueType)
+                else if (fieldType.IsArray)
                 {
-                    args.AppendWithComma($"{field.Name}={argval}");
-                }
-                else if (field.FieldType.IsArray)
-                {
-                    args.AppendWithComma($"{field.Name}=[");
-                    foreach (object value in (Array)argval)
-                    {
-                        args.Append($"\"{value}\", ");
-                    }
-                    args.Append(']');
-                }
-                else if (typeof(Delegate).IsAssignableFrom(field.FieldType))
-                {
-                    args.AppendWithComma($"{field.Name}=[{field.FieldType.Name}]");
+                    var array = (Array)argval;
+                    args.AppendWithComma(showAll
+                        ? $"{field.Name}=[{string.Join(", ", array.Cast<object?>().Select(v => $"\"{v}\""))}]"
+                        : $"{field.Name}=[{array.Length} item(s)]");
                 }
                 else
                 {
-                    args.AppendWithComma($"{field.Name}={{");
-                    foreach (var prop in field.FieldType.GetProperties().Select(p => p.Name))
-                    {
-                        try
-                        {
-                            object? val = field.FieldType
-                                .InvokeMember(prop, System.Reflection.BindingFlags.GetProperty, null, argval, null, null);
-                            args.Append($"{prop}:\"{val}\", ");
-                        }
-                        catch (Exception x)
-                        {
-                            args.Append($"{prop}:\"<Exception of type {x.GetType().Name}>\", ");
-                        }
-                    }
-                    args.Append('}');
+                    args.AppendWithComma($"{field.Name}=[{fieldType.Name}]");
                 }
             }
 
@@ -180,12 +170,17 @@ namespace Ozone
 
         static string ExtractMethodName(string reflectedName)
         {
-            string name = reflectedName;
-            if (!string.IsNullOrEmpty(name) && name[0] == '<')
+            // Compiler-generated lambda names look like "<Find>b__0_0"; keep the enclosing method name.
+            if (reflectedName.Length > 0 && reflectedName[0] == '<')
             {
-                name = name[1..name.IndexOf('>')];
+                int end = reflectedName.IndexOf('>');
+                if (end > 1)
+                {
+                    return reflectedName[1..end];
+                }
             }
-            return name;
+
+            return reflectedName;
         }
 
     }

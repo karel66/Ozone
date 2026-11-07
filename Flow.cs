@@ -14,50 +14,64 @@ namespace Ozone
         protected Flow() { }
 
         /// <summary>
-        /// Creates a synchronous Playwright context and navigates to the given URL.
+        /// Launches a browser, opens a page and navigates to the given URL.
         /// </summary>
-        public async static Task<Context> CreateContext(BrowserBrand browserBrand, Uri startPageUrl, bool headless = true)
+        /// <param name="browserBrand">Browser to launch. Chrome and Edge require the branded browser to be installed.</param>
+        /// <param name="startPageUrl">URL to navigate to.</param>
+        /// <param name="headless">Run the browser without a visible window.</param>
+        /// <param name="ignoreHttpsErrors">Disable TLS certificate validation. Use only for test environments with self-signed certificates.</param>
+        public async static Task<Context> CreateContext(BrowserBrand browserBrand, Uri startPageUrl, bool headless = true, bool ignoreHttpsErrors = false)
         {
             ArgumentNullException.ThrowIfNull(startPageUrl);
 
             Log(startPageUrl.ToString());
 
             var playwright = await Playwright.CreateAsync();
+            IBrowser? browser = null;
 
-            IBrowser browser;
-
-            var options = new BrowserTypeLaunchOptions
+            try
             {
-                Headless = headless
-            };
+                var options = new BrowserTypeLaunchOptions
+                {
+                    Headless = headless
+                };
 
-            switch(browserBrand)
-            {
-                case BrowserBrand.Chromium:
-                case BrowserBrand.Chrome:
-                case BrowserBrand.Edge:
-                    browser = await playwright.Chromium.LaunchAsync(options);
-                    break;
+                browser = browserBrand switch
+                {
+                    BrowserBrand.Chromium => await playwright.Chromium.LaunchAsync(options),
+                    BrowserBrand.Chrome => await playwright.Chromium.LaunchAsync(WithChannel(options, "chrome")),
+                    BrowserBrand.Edge => await playwright.Chromium.LaunchAsync(WithChannel(options, "msedge")),
+                    BrowserBrand.Firefox => await playwright.Firefox.LaunchAsync(options),
+                    BrowserBrand.Webkit => await playwright.Webkit.LaunchAsync(options),
+                    _ => throw new NotSupportedException($"Browser brand {browserBrand} not supported.")
+                };
 
-                case BrowserBrand.Firefox:
-                    browser = await playwright.Firefox.LaunchAsync(options);
-                    break;
+                if(ignoreHttpsErrors)
+                {
+                    Log("WARNING: HTTPS certificate errors are ignored.");
+                }
 
-                case BrowserBrand.Webkit:
-                    browser = await playwright.Webkit.LaunchAsync(options);
-                    break;
+                // Closing the browser also closes the page, so page needs no separate cleanup on failure.
+                var page = await browser.NewPageAsync(new() { IgnoreHTTPSErrors = ignoreHttpsErrors });
 
-                default:
-                    throw new NotSupportedException($"Browser brand {browserBrand} not supported.");
+                await page.GotoAsync(startPageUrl.ToString());
+
+                return new Context(playwright, browser, page, null, null, null, new());
             }
-            ;
+            catch
+            {
+                if(browser != null)
+                {
+                    try { await browser.CloseAsync(); } catch(Exception x) { LogError("Failed to close browser", x); }
+                }
 
-            var page = await browser.NewPageAsync(new() { IgnoreHTTPSErrors = true });
-
-            await page.GotoAsync(startPageUrl.ToString());
-
-            return new Context(playwright, browser, page, null, null, null, new());
+                playwright.Dispose();
+                throw;
+            }
         }
+
+        static BrowserTypeLaunchOptions WithChannel(BrowserTypeLaunchOptions options, string channel) =>
+            new(options) { Channel = channel };
 
     }
 }
