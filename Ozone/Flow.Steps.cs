@@ -72,7 +72,9 @@ namespace Ozone
         {
             ArgumentNullException.ThrowIfNull(step);
 
-            return While(condition, async c => (await step.Bind(c)).Context!, maxIterations);
+            return While(condition,
+                async c => (await step.Bind(c)).Context ?? c.CreateProblem($"{nameof(While)}: step chain returned no context"),
+                maxIterations);
         }
 
         /// <summary>
@@ -229,7 +231,7 @@ namespace Ozone
         public static Func<Context, Task<Context>> SetText(string text) =>
             context => OnElement(context, nameof(SetText), async e =>
             {
-                if(await e.EvaluateAsync<string>("e => e.tagName") == "SELECT")
+                if(await e.EvaluateAsync<string>("e => e.tagName.toLowerCase()") == "select")
                 {
                     await e.SelectOptionAsync(text);
                 }
@@ -263,11 +265,18 @@ namespace Ozone
         }
 
         /// <summary>
-        /// Clicks the link and waits until the target page has the expected title. A link that
-        /// opens a new window (<c>target="_blank"</c>) continues in that window. Waits up to
-        /// <see cref="Context.FindTimeout"/> for the title.
+        /// Clicks the link and waits until the target page has loaded and has the expected title,
+        /// waiting up to <see cref="Context.FindTimeout"/> for each.
         /// </summary>
-        /// <returns>A context for the target page, without Element or Collection.</returns>
+        /// <remarks>
+        /// When the link opens a new window, the flow continues in that window. That is the case
+        /// when the link (the found element or its enclosing <c>a</c>/<c>area</c>), or failing that the
+        /// page's <c>base</c> element, has a <c>target</c> other than <c>_self</c>, <c>_parent</c> or
+        /// <c>_top</c>. Windows opened by script (<c>window.open</c>) are not followed.
+        /// The title is checked on the top-level page, so a link followed from inside a frame
+        /// continues at the top level.
+        /// </remarks>
+        /// <returns>A context for the target page, without Frame, Element or Collection.</returns>
         public static Func<Context, Task<Context>> FollowLink(string selector, string targetTitle) =>
             async context =>
             {
@@ -276,23 +285,26 @@ namespace Ozone
                 return await Guard(context, async () =>
                 {
                     var element = link.Element!;
+                    float timeout = (float)context.FindTimeout.TotalMilliseconds;
                     Context target;
 
-                    if(await element.GetAttributeAsync("target") == "_blank")
+                    if(OpensNewWindow(await element.EvaluateAsync<string?>(LinkTargetScript)))
                     {
-                        var popup = await context.Page.RunAndWaitForPopupAsync(() => element.ClickAsync());
+                        var popup = await context.Page.RunAndWaitForPopupAsync(() => element.ClickAsync(), new() { Timeout = timeout });
                         target = context.NextPage(popup);
                     }
                     else
                     {
+                        // Click waits for a navigation it starts to begin; this waits for it to finish.
                         await element.ClickAsync();
-                        target = context.EmptyContext();
+                        target = context.NextPage(context.Page);
                     }
+
+                    await target.Page.WaitForLoadStateAsync(LoadState.Load, new() { Timeout = timeout });
 
                     try
                     {
-                        await Assertions.Expect(target.Page).ToHaveTitleAsync(targetTitle,
-                            new() { Timeout = (float)target.FindTimeout.TotalMilliseconds });
+                        await Assertions.Expect(target.Page).ToHaveTitleAsync(targetTitle, new() { Timeout = timeout });
                     }
                     catch(PlaywrightException)
                     {
@@ -302,6 +314,18 @@ namespace Ozone
                     return target;
                 });
             };
+
+        /// <summary>
+        /// Returns the browsing-context target of the element's link, or of the document's base element.
+        /// </summary>
+        const string LinkTargetScript =
+            "e => e.closest('a, area')?.target || document.querySelector('base[target]')?.target || null";
+
+        static bool OpensNewWindow(string? target) =>
+            !string.IsNullOrEmpty(target)
+            && !target.Equals("_self", StringComparison.OrdinalIgnoreCase)
+            && !target.Equals("_parent", StringComparison.OrdinalIgnoreCase)
+            && !target.Equals("_top", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
         /// Finds the <c>iframe</c> (or <c>frame</c>) element by CSS selector and continues inside it:
@@ -315,11 +339,19 @@ namespace Ozone
                 return await Guard(context, async () =>
                 {
                     var handle = await frameElement.Element!.ElementHandleAsync();
-                    var frame = await handle.ContentFrameAsync();
 
-                    return frame == null
-                        ? context.CreateProblem($"{nameof(EnterFrame)}: '{selector}' is not a frame")
-                        : context.NextFrame(frame);
+                    try
+                    {
+                        var frame = await handle.ContentFrameAsync();
+
+                        return frame == null
+                            ? context.CreateProblem($"{nameof(EnterFrame)}: '{selector}' is not a frame")
+                            : context.NextFrame(frame);
+                    }
+                    finally
+                    {
+                        await handle.DisposeAsync();
+                    }
                 });
             };
 
@@ -371,9 +403,7 @@ namespace Ozone
 
             foreach(var item in collection)
             {
-                var itemText = await item.Text();
-
-                if(itemText != null && itemText.Contains(text))
+                if(await item.TextContains(text))
                 {
                     match = item;
 
@@ -387,10 +417,16 @@ namespace Ozone
             return match;
         }
 
-        static string ContextItem(Context context, string stepName, string contextKey) =>
-            context.Items.TryGetValue(contextKey, out string? text)
-                ? text
-                : throw new OzoneException($"{stepName}: context item '{contextKey}' not found");
+        static string ContextItem(Context context, string stepName, string contextKey)
+        {
+            if(context.Items.TryGetValue(contextKey, out string? text))
+            {
+                return text;
+            }
+
+            context.CreateProblem($"{stepName}: context item '{contextKey}' not found");
+            throw new System.Diagnostics.UnreachableException();
+        }
 
         /// <summary>
         /// Selects the first element in the context Collection whose text contains the given text.
@@ -446,7 +482,7 @@ namespace Ozone
 
                     return actual == expected
                         ? context
-                        : context.CreateProblem($"Expected {attributeName}='{expected}', actual {attributeName}='{actual}'");
+                        : context.CreateProblem($"{nameof(AssertAttributeValue)}: expected {attributeName}='{expected}', actual {attributeName}='{actual}'");
                 });
             };
         }

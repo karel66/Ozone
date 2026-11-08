@@ -375,4 +375,26 @@ public sealed class FlowLogicTests
     {
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => Flow.Retry(Mark, maxAttempts: 0));
     }
+
+    [TestMethod]
+    public async Task While_WithAsyncStep_WhenChainReturnsNull_FailsWithClearMessage()
+    {
+        var chain = new AsyncStep(_ => Task.FromResult<Context>(null!));
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() =>
+            Flow.While(_ => Task.FromResult(true), chain)(TestContexts.Detached()));
+
+        StringAssert.Contains(x.Message, "step chain returned no context");
+    }
+
+    [TestMethod]
+    public async Task ContextItemFilter_WithMissingKey_FailsThroughCreateProblem()
+    {
+        var context = TestContexts.Detached(collection: new List<ILocator>());
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.FirstContainingContextItem("missing")(context));
+
+        Assert.AreEqual("FirstContainingContextItem: context item 'missing' not found", x.Message);
+        Assert.IsNull(x.InnerException);
+    }
 }
