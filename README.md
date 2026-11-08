@@ -44,7 +44,7 @@ or chained with `AsyncStep` and the `|` operator as shown above.
 
 | Group | Steps |
 |---|---|
-| Find on page or frame | `Find`, `FindLast`, `FindAll`, `FindOnXPath`, `FindAllOnXPath`, `FindByText`, `Exists`, `IfExists` |
+| Find on page or frame | `Find`, `FindLast`, `FindAll`, `FindOnXPath`, `FindAllOnXPath`, `FindByText`, `Exists`, `IfExists`, `BreakIfNotExists` (stops an `AsyncStep` chain when nothing matches) |
 | Find inside the current element | `RelativeFind`, `RelativeFindAll`, `RelativeFindOnXPath`, `RelativeFindAllOnXPath` |
 | Pick from a collection | `FirstContainingText`, `LastContainingText`, `FirstContainingContextItem`, `LastContainingContextItem` |
 | Actions | `Click`, `DblClick`, `SetText`, `PressEnter`, `FollowLink`, `Script` |
@@ -55,7 +55,7 @@ Finders wait up to 10 seconds for the first match. Use `context.WithFindTimeout(
 
 **Errors.** A failing step throws `OzoneException`. When the failure came from Playwright, the original exception is kept as `InnerException`.
 
-**Logging.** Each step in an `AsyncStep` chain is logged to the console with its arguments. Locator arguments are shown; other text, such as values typed by `SetText`, is shown as `***`. Set `Flow.TraceSensitiveValues = true` to log all values while debugging locally.
+**Logging.** Each step in an `AsyncStep` chain is logged to the console with its arguments. Numbers and other simple values are shown; all text, including selectors and values typed by `SetText`, is shown as `***`. Set `Flow.TraceSensitiveValues = true` to log all values while debugging locally.
 
 ## Building and testing
 

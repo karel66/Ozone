@@ -8,6 +8,8 @@ namespace Ozone
     public class AsyncStep
     {
         readonly Func<Context, Task<Context>>? _step = null;
+        readonly Func<Context, Task<bool>>? _proceed = null;
+        readonly string? _gateName = null;
         AsyncStep? _next = null;
         Context? _context = null;
 
@@ -27,11 +29,30 @@ namespace Ozone
         }
 
         /// <summary>
+        /// Creates a gate: when the chain reaches it, the rest of the chain runs only if
+        /// <paramref name="proceed"/> returns true. Otherwise the chain stops here with the
+        /// gate's input context as its result. The chain itself is not changed, so it can be
+        /// run again (for example by <see cref="Flow.While(Func{Ozone.Context, Task{bool}}, AsyncStep, int)"/>).
+        /// </summary>
+        /// <param name="name">Step name for the trace; the arguments come from <paramref name="proceed"/>'s captured values.</param>
+        /// <param name="proceed">Decides whether the rest of the chain runs.</param>
+        internal AsyncStep(string name, Func<Context, Task<bool>> proceed)
+        {
+            _gateName = name;
+            _proceed = proceed;
+        }
+
+        /// <summary>
         /// Trace execution
         /// </summary>
         /// <returns></returns>
         public string? MethodTrace()
         {
+            if (_proceed != null)
+            {
+                return $"{_gateName}({FormatTarget(_proceed.Target)})";
+            }
+
             if (_step == null)
             {
                 return null;
@@ -76,6 +97,17 @@ namespace Ozone
                 _context = await _step(context)
                     ?? context.CreateProblem($"{trace}: step returned no context");
             }
+            else if (_proceed != null) // this is a gate
+            {
+                string? trace = Flow.Log(MethodTrace());
+                _context = context;
+
+                if (!await _proceed(context))
+                {
+                    Flow.Log($"{trace}: rest of the chain skipped");
+                    return this;
+                }
+            }
             else // this is empty step
             {
                 _context = context;
@@ -115,20 +147,11 @@ namespace Ozone
             return first.Link(next);
         }
 
-        /// <summary>
-        /// Captured string arguments whose values are safe to log (locators, keys, labels).
-        /// Any other captured string — e.g. the text typed by SetText — is redacted,
-        /// because it may hold passwords, tokens or personal data.
-        /// </summary>
-        static readonly HashSet<string> LoggableStringFields = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "selector", "xpath", "attributeName", "contextKey", "targetTitle"
-        };
-
+        
         /// <summary>
         /// Formats the closure's captured arguments for the trace log. By default only
-        /// allow-listed strings and primitive values are printed; other strings, chars and
-        /// arrays are redacted. <see cref="Flow.TraceSensitiveValues"/> prints them all.
+        /// primitive values are printed; strings (selectors included), chars and arrays
+        /// are redacted. <see cref="Flow.TraceSensitiveValues"/> prints them all.
         /// Objects are always shown by type only.
         /// </summary>
         static string FormatTarget(object? target)
@@ -150,15 +173,12 @@ namespace Ozone
                 }
                 else if (fieldType == typeof(string))
                 {
-                    args.AppendWithComma(showAll || LoggableStringFields.Contains(field.Name)
-                        ? $"{field.Name}=\"{argval}\""
-                        : $"{field.Name}=***");
+                    args.AppendWithComma(showAll ? $"{field.Name}=\"{argval}\"" : $"{field.Name}=***");
                 }
                 else if (fieldType.IsPrimitive || fieldType.IsEnum)
                 {
                     args.AppendWithComma(fieldType != typeof(char) ? $"{field.Name}={argval}"
-                        : showAll ? $"{field.Name}='{argval}'"
-                        : $"{field.Name}=***");
+                        : showAll ? $"{field.Name}='{argval}'" : $"{field.Name}=***");
                 }
                 else if (fieldType.IsArray)
                 {

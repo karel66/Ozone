@@ -64,17 +64,17 @@ public sealed class AsyncStepTests
     }
 
     [TestMethod]
-    public void MethodTrace_ForStepFactory_ShowsFactoryNameAndLocatorArguments()
+    public void MethodTrace_ForStepFactory_ShowsFactoryNameAndRedactsStrings()
     {
         // The order of captured fields is chosen by the compiler, so check each argument separately.
         var find = new AsyncStep(Flow.Find("#id", 2)).MethodTrace()!;
         StringAssert.StartsWith(find, "Find(");
-        StringAssert.Contains(find, "selector=\"#id\"");
+        StringAssert.Contains(find, "selector=***");
         StringAssert.Contains(find, "index=2");
 
         var xpath = new AsyncStep(Flow.FindOnXPath("//a")).MethodTrace()!;
         StringAssert.StartsWith(xpath, "FindOnXPath(");
-        StringAssert.Contains(xpath, "xpath=\"//a\"");
+        StringAssert.Contains(xpath, "xpath=***");
         StringAssert.Contains(xpath, "timeoutSeconds=1");
     }
 
@@ -109,13 +109,13 @@ public sealed class AsyncStepTraceRedactionTests
     public void ResetSwitch() => Flow.TraceSensitiveValues = false;
 
     [TestMethod]
-    public void MethodTrace_ByDefault_RedactsNonLocatorStrings()
+    public void MethodTrace_ByDefault_RedactsAllStrings()
     {
         Flow.TraceSensitiveValues = false;
 
         var trace = new AsyncStep(Flow.SetText("#pwd", "hunter2")).MethodTrace();
 
-        Assert.AreEqual("SetText(selector=\"#pwd\", text=***)", trace);
+        Assert.AreEqual("SetText(selector=***, text=***)", trace);
     }
 
     [TestMethod]

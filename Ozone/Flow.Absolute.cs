@@ -95,5 +95,31 @@ namespace Ozone
                 return context;
             };
 
+        /// <summary>
+        /// Chain gate: stops an <see cref="AsyncStep"/> chain unless an element matches the CSS
+        /// selector in the page or current frame, waiting up to <paramref name="waitSeconds"/> for one.
+        /// </summary>
+        /// <remarks>
+        /// When nothing matches, the steps after the gate are skipped and the chain's result is the
+        /// context the gate received. The context passes through unchanged when an element matches.
+        /// The chain is not modified, so it can be run again (for example by
+        /// <see cref="While(Func{Context, Task{bool}}, AsyncStep, int)"/>) and the check is repeated.
+        /// <code>
+        /// ctx | (Flow.BreakIfNotExists("#next") | Flow.Find("#next") | Flow.Click)
+        /// </code>
+        /// </remarks>
+        public static AsyncStep BreakIfNotExists(string selector, float waitSeconds = 1) =>
+            new(nameof(BreakIfNotExists), async context =>
+            {
+                try
+                {
+                    return await Exists(context, selector, waitSeconds) != null;
+                }
+                catch(Exception x)
+                {
+                    context.CreateProblem(x);
+                    throw; // not reached: CreateProblem always throws
+                }
+            });
     }
 }

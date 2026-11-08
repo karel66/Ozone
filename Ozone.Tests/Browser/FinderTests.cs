@@ -207,6 +207,70 @@ public sealed class FinderTests
         Assert.AreEqual("alpha", seen);
     }
 
+    // --- BreakIfNotExists -------------------------------------------------
+
+    static Func<Context, Task<Context>> Mark(string value) =>
+        c => { c.Items.AddOrUpdate("trail", value, (_, old) => old + value); return Task.FromResult(c); };
+
+    [TestMethod]
+    public async Task BreakIfNotExists_WhenElementExists_RunsRestOfChain()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+
+        var last = await (context | (new AsyncStep(Mark("a")) | Flow.BreakIfNotExists("#list") | Mark("b")));
+
+        Assert.AreEqual("ab", context.Items["trail"]);
+        Assert.AreSame(context, last.Context);
+    }
+
+    [TestMethod]
+    public async Task BreakIfNotExists_WhenElementMissing_SkipsRestOfChainAndReturnsGateInput()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+        var list = await Flow.Find("#list")(context);
+
+        var last = await (list | (Flow.BreakIfNotExists("#missing", waitSeconds: 0.2f) | Mark("b") | Mark("c")));
+
+        Assert.IsFalse(context.Items.ContainsKey("trail"));
+        Assert.AreSame(list, last.Context);
+    }
+
+    [TestMethod]
+    public async Task BreakIfNotExists_DoesNotChangeChain_SoRerunChecksAgain()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+        var chain = Flow.BreakIfNotExists("#late", waitSeconds: 0.2f) | Mark("x");
+
+        await (context | chain);
+        Assert.IsFalse(context.Items.ContainsKey("trail"));
+
+        await context.Page.EvaluateAsync("() => document.body.insertAdjacentHTML('beforeend', '<p id=\"late\">late</p>')");
+        await (context | chain);
+
+        Assert.AreEqual("x", context.Items["trail"]);
+    }
+
+    [TestMethod]
+    public async Task BreakIfNotExists_InWhile_StopsEachIterationAtGate()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+        int runs = 0;
+        var chain = new AsyncStep(c => { runs++; return Task.FromResult(c); })
+            | Flow.BreakIfNotExists("#missing", waitSeconds: 0.1f)
+            | Mark("never");
+
+        await Flow.While(_ => Task.FromResult(runs < 3), chain)(context);
+
+        Assert.AreEqual(3, runs);
+        Assert.IsFalse(context.Items.ContainsKey("trail"));
+    }
+
+    [TestMethod]
+    public void BreakIfNotExists_TracesStepName()
+    {
+        StringAssert.StartsWith(Flow.BreakIfNotExists("#x").MethodTrace(), "BreakIfNotExists(");
+    }
+
     // --- Consistency across finders ---------------------------------------
 
     [TestMethod]
