@@ -198,8 +198,9 @@ namespace Ozone
                     break;
 
                 case Exception x:
-                    Flow.Log($"Problem created: {x.GetType().Name}: {x.Message}");
-                    throw new OzoneException(x.Message, x);
+                    string message = Flow.Sensitive(x); // Playwright messages contain the selector
+                    Flow.Log($"Problem created: {x.GetType().Name}: {message}");
+                    throw new OzoneException(message, x);
             }
 
             Flow.Log($"Problem created: {problem}");

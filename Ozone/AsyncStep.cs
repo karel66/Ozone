@@ -10,13 +10,22 @@ namespace Ozone
         readonly Func<Context, Task<Context>>? _step = null;
         readonly Func<Context, Task<bool>>? _proceed = null;
         readonly string? _gateName = null;
+        readonly AsyncStep? _subChain = null;
         AsyncStep? _next = null;
         Context? _context = null;
+        bool _stopped = false;
 
         /// <summary>
         /// Result of the step function on bound context.
         /// </summary>
         public Context? Context => _context;
+
+        /// <summary>
+        /// True when this step is a gate (see <see cref="BreakUnless"/>) that stopped the chain on
+        /// the last <see cref="Bind"/>, so the steps after it did not run. <see cref="Bind"/> returns the
+        /// gate in that case, so check this on its result to tell a stopped chain from a finished one.
+        /// </summary>
+        public bool Stopped => _stopped;
 
         /// <summary>
         /// Wraps a step so it can be chained with <c>
@@ -28,24 +37,45 @@ namespace Ozone
             _next = null;
         }
 
-        /// <summary>
-        /// Creates a gate: when the chain reaches it, the rest of the chain runs only if
-        /// <paramref name="proceed"/> returns true. Otherwise the chain stops here with the
-        /// gate's input context as its result. The chain itself is not changed, so it can be
-        /// run again (for example by <see cref="Flow.While(Func{Ozone.Context, Task{bool}}, AsyncStep, int)"/>).
-        /// </summary>
-        /// <param name="name">Step name for the trace; the arguments come from <paramref name="proceed"/>'s captured values.</param>
-        /// <param name="proceed">Decides whether the rest of the chain runs.</param>
-        internal AsyncStep(string name, Func<Context, Task<bool>> proceed)
+        AsyncStep(string name, Func<Context, Task<bool>> proceed)
         {
             _gateName = name;
             _proceed = proceed;
         }
 
+        // Runs a linked multi-step chain as one step. It has no trace line of its own: its steps trace themselves.
+        AsyncStep(AsyncStep subChain)
+        {
+            _subChain = subChain;
+        }
+
+        /// <summary>
+        /// Creates a gate: when the chain reaches it, the rest of the chain runs only if
+        /// <paramref name="proceed"/> returns true. Otherwise the chain stops here: <see cref="Bind"/>
+        /// returns the gate, with <see cref="Stopped"/> set and the gate's input context as
+        /// <see cref="Context"/>. The context passes through unchanged when the chain goes on.
+        /// A gate stops only the chain it is linked into: a multi-step chain linked as the right-hand
+        /// operand of <c>|</c> runs as one step, so in <c>a | (gate | b) | c</c> a stop skips <c>b</c> but
+        /// not <c>c</c>. <see cref="Flow.While(Func{Ozone.Context, Task{bool}}, AsyncStep, int)"/> ends its
+        /// loop when the chain stops. An exception thrown by <paramref name="proceed"/> fails the chain
+        /// with <see cref="OzoneException"/>.
+        /// <code>
+        /// ctx | (AsyncStep.BreakUnless("HasNext", c => Flow.ExistsOnXPath(c, "//a[@rel='next']")) | Flow.FindOnXPath("//a[@rel='next']") | Flow.Click)
+        /// </code>
+        /// </summary>
+        /// <param name="name">Step name for the trace; the arguments come from <paramref name="proceed"/>'s captured values.</param>
+        /// <param name="proceed">Decides whether the rest of the chain runs.</param>
+        public static AsyncStep BreakUnless(string name, Func<Context, Task<bool>> proceed)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(name);
+            ArgumentNullException.ThrowIfNull(proceed);
+            return new AsyncStep(name, proceed);
+        }
+
         /// <summary>
         /// Trace execution
         /// </summary>
-        /// <returns></returns>
+        /// <returns>The step name and its arguments, or null for a step that is not traced itself (an empty step or a nested chain).</returns>
         public string? MethodTrace()
         {
             if (_proceed != null)
@@ -67,10 +97,18 @@ namespace Ozone
         public AsyncStep Link(Func<Context, Task<Context>> next) => Link(new AsyncStep(next));
 
         /// <summary>
-        /// Link next step.
+        /// Link next step. A single step joins this chain; a chain of several steps is linked as
+        /// one step (it runs as a whole, and a gate in it stops only that chain).
         /// </summary>
         public AsyncStep Link(AsyncStep next)
         {
+            ArgumentNullException.ThrowIfNull(next);
+
+            if (next._next != null)
+            {
+                next = new AsyncStep(subChain: next);
+            }
+
             if (_next == null)
             {
                 _next = next;
@@ -90,6 +128,7 @@ namespace Ozone
         public async Task<AsyncStep> Bind(Context context)
         {
             ArgumentNullException.ThrowIfNull(context);
+            _stopped = false;
 
             if (_step != null)
             {
@@ -100,13 +139,31 @@ namespace Ozone
             else if (_proceed != null) // this is a gate
             {
                 string? trace = Flow.Log(MethodTrace());
+                bool proceed = false;
+
+                try
+                {
+                    proceed = await _proceed(context);
+                }
+                catch (Exception x)
+                {
+                    context.CreateProblem(x); // always throws OzoneException
+                }
+
                 _context = context;
 
-                if (!await _proceed(context))
+                if (!proceed)
                 {
                     Flow.Log($"{trace}: rest of the chain skipped");
+                    _stopped = true;
                     return this;
                 }
+            }
+            else if (_subChain != null)
+            {
+                // Bind fails if a step returns no context, so Context is set. A stop inside the
+                // nested chain ends only that chain, so this step's Stopped stays false.
+                _context = (await _subChain.Bind(context)).Context!;
             }
             else // this is empty step
             {

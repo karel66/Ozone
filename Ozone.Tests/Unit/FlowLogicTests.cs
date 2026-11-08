@@ -212,7 +212,7 @@ public sealed class FlowLogicTests
 
         var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.FirstContainingContextItem("missing")(context));
 
-        StringAssert.Contains(x.Message, "'missing'");
+        StringAssert.Contains(x.Message, "context item *** not found");
     }
 
     [TestMethod]
@@ -222,7 +222,7 @@ public sealed class FlowLogicTests
 
         var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.LastContainingContextItem("missing")(context));
 
-        StringAssert.Contains(x.Message, "'missing'");
+        StringAssert.Contains(x.Message, "context item *** not found");
     }
 
     [TestMethod]
@@ -394,7 +394,26 @@ public sealed class FlowLogicTests
 
         var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.FirstContainingContextItem("missing")(context));
 
-        Assert.AreEqual("FirstContainingContextItem: context item 'missing' not found", x.Message);
+        Assert.AreEqual("FirstContainingContextItem: context item *** not found", x.Message);
         Assert.IsNull(x.InnerException);
+    }
+
+    [TestMethod]
+    public void WaitArguments_RejectNegativeNaNAndInfinity_ButAllowZero()
+    {
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => Flow.BreakIfNotExists("#x", -1));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => Flow.FindOnXPath("//p", timeoutSeconds: float.NaN));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => Flow.IfExists("#x", waitSeconds: float.PositiveInfinity));
+
+        Flow.BreakIfNotExists("#x", 0);
+        Flow.FindOnXPath("//p", timeoutSeconds: 0);
+        Flow.IfExists("#x", waitSeconds: 0);
+    }
+
+    [TestMethod]
+    public async Task Exists_WithNegativeWait_ThrowsArgumentOutOfRange()
+    {
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() => Flow.Exists(TestContexts.Detached(), "#x", -0.5f));
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() => Flow.ExistsOnXPath(TestContexts.Detached(), "//p", float.NaN));
     }
 }

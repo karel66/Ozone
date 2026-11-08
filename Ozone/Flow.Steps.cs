@@ -17,7 +17,7 @@ namespace Ozone
         /// Runs the body and turns any exception other than <see cref="OzoneException"/>
         /// into a problem, so steps only ever fail with <see cref="OzoneException"/>.
         /// </summary>
-        static async Task<Context> Guard(Context context, Func<Task<Context>> body)
+        internal static async Task<Context> Guard(Context context, Func<Task<Context>> body)
         {
             try
             {
@@ -45,7 +45,31 @@ namespace Ozone
         /// <param name="maxIterations">Fails with <see cref="OzoneException"/> if the condition is still true after this many runs.</param>
         public static Func<Context, Task<Context>> While(Func<Context, Task<bool>> condition, Func<Context, Task<Context>> step, int maxIterations = DefaultMaxIterations)
         {
-            ArgumentOutOfRangeException.ThrowIfLessThan(maxIterations, 1);
+            ArgumentNullException.ThrowIfNull(step);
+            return Loop(condition, async c => (await step(c), false), maxIterations);
+        }
+
+        /// <summary>
+        /// Executes the step chain while the condition returns true. The loop also ends when a gate
+        /// (see <see cref="AsyncStep.BreakUnless"/>) stops the chain, like <c>break</c>; the result is
+        /// then the context the gate received.
+        /// </summary>
+        /// <inheritdoc cref="While(Func{Context, Task{bool}}, Func{Context, Task{Context}}, int)"/>
+        public static Func<Context, Task<Context>> While(Func<Context, Task<bool>> condition, AsyncStep step, int maxIterations = DefaultMaxIterations)
+        {
+            ArgumentNullException.ThrowIfNull(step);
+
+            return Loop(condition, async c =>
+            {
+                var last = await step.Bind(c);
+                return (last.Context!, last.Stopped); // Bind fails if a step returns no context, so Context is set.
+            }, maxIterations);
+        }
+
+        // The loop behind both While overloads; a step that reports Stop ends it like break.
+        static Func<Context, Task<Context>> Loop(Func<Context, Task<bool>> condition, Func<Context, Task<(Context Next, bool Stop)>> step, int maxIterations)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(maxIterations, 1, nameof(maxIterations));
 
             return context => Guard(context, async () =>
             {
@@ -58,23 +82,16 @@ namespace Ozone
                         return current.CreateProblem($"{nameof(While)}: condition still true after {maxIterations} iteration(s)");
                     }
 
-                    current = await step(current);
+                    (current, bool stop) = await step(current);
+
+                    if(stop)
+                    {
+                        break;
+                    }
                 }
 
                 return current;
             });
-        }
-
-        /// <summary>
-        /// Executes the step chain while the condition returns true.
-        /// </summary>
-        /// <inheritdoc cref="While(Func{Context, Task{bool}}, Func{Context, Task{Context}}, int)"/>
-        public static Func<Context, Task<Context>> While(Func<Context, Task<bool>> condition, AsyncStep step, int maxIterations = DefaultMaxIterations)
-        {
-            ArgumentNullException.ThrowIfNull(step);
-
-            // Bind fails if any step in the chain returns no context, so Context is set here.
-            return While(condition, async c => (await step.Bind(c)).Context!, maxIterations);
         }
 
         /// <summary>
@@ -348,7 +365,7 @@ namespace Ozone
                     }
                     catch(Exception x) when(x is TimeoutException or PlaywrightException)
                     {
-                        return target.CreateProblem($"{nameof(FollowLink)}: expected title '{targetTitle}', actual '{await frame.TitleAsync()}'");
+                        return target.CreateProblem($"{nameof(FollowLink)}: expected title {Sensitive(targetTitle)}, actual {Sensitive(await frame.TitleAsync())}");
                     }
 
                     return target;
@@ -509,7 +526,7 @@ namespace Ozone
                         var frame = await handle.ContentFrameAsync();
 
                         return frame == null
-                            ? context.CreateProblem($"{nameof(EnterFrame)}: '{selector}' is not a frame")
+                            ? context.CreateProblem($"{nameof(EnterFrame)}: {Sensitive(selector)} is not a frame")
                             : context.NextFrame(frame);
                     }
                     finally
@@ -588,7 +605,7 @@ namespace Ozone
                 return text;
             }
 
-            context.CreateProblem($"{stepName}: context item '{contextKey}' not found");
+            context.CreateProblem($"{stepName}: context item {Sensitive(contextKey)} not found");
             throw new System.Diagnostics.UnreachableException();
         }
 
@@ -598,7 +615,7 @@ namespace Ozone
         public static Func<Context, Task<Context>> FirstContainingText(string text) =>
             CollectionFilter(nameof(FirstContainingText),
                 c => ContainingText(c.Collection!, text, last: false),
-                c => $"text '{text}' not found in {c.Collection!.Count} item(s)");
+                c => $"text {Sensitive(text)} not found in {c.Collection!.Count} item(s)");
 
         /// <summary>
         /// Selects the last element in the context Collection whose text contains the given text.
@@ -606,7 +623,7 @@ namespace Ozone
         public static Func<Context, Task<Context>> LastContainingText(string text) =>
             CollectionFilter(nameof(LastContainingText),
                 c => ContainingText(c.Collection!, text, last: true),
-                c => $"text '{text}' not found in {c.Collection!.Count} item(s)");
+                c => $"text {Sensitive(text)} not found in {c.Collection!.Count} item(s)");
 
         /// <summary>
         /// Selects the first element in the context Collection whose text contains the value stored in <see cref="Context.Items"/> under the given key.
@@ -614,7 +631,7 @@ namespace Ozone
         public static Func<Context, Task<Context>> FirstContainingContextItem(string contextKey) =>
             CollectionFilter(nameof(FirstContainingContextItem),
                 c => ContainingText(c.Collection!, ContextItem(c, nameof(FirstContainingContextItem), contextKey), last: false),
-                c => $"text of context item '{contextKey}' not found in {c.Collection!.Count} item(s)");
+                c => $"text of context item {Sensitive(contextKey)} not found in {c.Collection!.Count} item(s)");
 
         /// <summary>
         /// Selects the last element in the context Collection whose text contains the value stored in <see cref="Context.Items"/> under the given key.
@@ -622,7 +639,7 @@ namespace Ozone
         public static Func<Context, Task<Context>> LastContainingContextItem(string contextKey) =>
             CollectionFilter(nameof(LastContainingContextItem),
                 c => ContainingText(c.Collection!, ContextItem(c, nameof(LastContainingContextItem), contextKey), last: true),
-                c => $"text of context item '{contextKey}' not found in {c.Collection!.Count} item(s)");
+                c => $"text of context item {Sensitive(contextKey)} not found in {c.Collection!.Count} item(s)");
 
         // --- Assertions ------------------------------------------------------
 
@@ -646,7 +663,7 @@ namespace Ozone
 
                     return actual == expected
                         ? context
-                        : context.CreateProblem($"{nameof(AssertAttributeValue)}: expected {attributeName}='{expected}', actual {attributeName}='{actual}'");
+                        : context.CreateProblem($"{nameof(AssertAttributeValue)}: expected {attributeName}={Sensitive(expected)}, actual {attributeName}={Sensitive(actual)}");
                 });
             };
         }

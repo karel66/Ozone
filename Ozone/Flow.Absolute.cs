@@ -29,8 +29,12 @@ namespace Ozone
         /// Find element by XPath from page/frame.
         /// A negative index counts from the end (-1 is the last match).
         /// </summary>
-        public static Func<Context, Task<Context>> FindOnXPath(string xpath, int index = 0, float timeoutSeconds = 1.0f) =>
-            async context => await SelectOne(context, nameof(FindOnXPath), xpath, context.RootLocatorForXPath(xpath), index, WaitSeconds(timeoutSeconds));
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeoutSeconds"/> is negative, NaN or infinite.</exception>
+        public static Func<Context, Task<Context>> FindOnXPath(string xpath, int index = 0, float timeoutSeconds = 1.0f)
+        {
+            CheckWait(timeoutSeconds, nameof(timeoutSeconds));
+            return async context => await SelectOne(context, nameof(FindOnXPath), xpath, context.RootLocatorForXPath(xpath), index, WaitSeconds(timeoutSeconds));
+        }
 
         /// <summary>
         /// Find the first element containing the given text from page/frame.
@@ -46,39 +50,66 @@ namespace Ozone
 
         /// <summary>
         /// Find an element using CSS selector, otherwise returns null.
+        /// A wait of zero checks once without waiting.
         /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeoutSeconds"/> is negative, NaN or infinite.</exception>
+        /// <exception cref="OzoneException">The search failed, for example because the selector is invalid.</exception>
         public async static Task<Context?> Exists(Context context, string selector, float timeoutSeconds)
         {
+            CheckWait(timeoutSeconds, nameof(timeoutSeconds));
             var locator = context.RootLocatorForSelector(selector);
 
-            if(await WaitAndCount(locator, WaitSeconds(timeoutSeconds)) > 0)
+            if(await CountOrProblem(context, locator, timeoutSeconds) > 0)
             {
                 return context.NextElement(locator.First);
             }
 
-            Log($"Selector {selector} does not exist.");
+            Log($"Selector {Sensitive(selector)} does not exist.");
             return null;
         }
 
         /// <summary>
         /// Checks whether an element exists by XPath.
+        /// A wait of zero checks once without waiting.
         /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeoutSeconds"/> is negative, NaN or infinite.</exception>
+        /// <exception cref="OzoneException">The search failed, for example because the XPath is invalid.</exception>
         public async static Task<bool> ExistsOnXPath(Context context, string xpath, float timeoutSeconds = 1.0f)
         {
-            if(await WaitAndCount(context.RootLocatorForXPath(xpath), WaitSeconds(timeoutSeconds)) > 0)
+            CheckWait(timeoutSeconds, nameof(timeoutSeconds));
+
+            if(await CountOrProblem(context, context.RootLocatorForXPath(xpath), timeoutSeconds) > 0)
             {
                 return true;
             }
 
-            Log($"{xpath} not found");
+            Log($"XPath {Sensitive(xpath)} not found");
             return false;
+        }
+
+        static async Task<int> CountOrProblem(Context context, ILocator locator, float timeoutSeconds)
+        {
+            try
+            {
+                return await WaitAndCount(locator, WaitSeconds(timeoutSeconds));
+            }
+            catch(Exception x)
+            {
+                context.CreateProblem(x); // always throws OzoneException
+                return 0;
+            }
         }
 
         /// <summary>
         /// Executes the step if element by the selector is found.
+        /// A wait of zero checks once without waiting.
         /// </summary>
-        public static Func<Context, Task<Context>> IfExists(string selector, Func<Context, Task<Context>>? onTrue = null, Func<Context, Task<Context>>? onFalse = null, float waitSeconds = 1) =>
-            async context =>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="waitSeconds"/> is negative, NaN or infinite.</exception>
+        public static Func<Context, Task<Context>> IfExists(string selector, Func<Context, Task<Context>>? onTrue = null, Func<Context, Task<Context>>? onFalse = null, float waitSeconds = 1)
+        {
+            CheckWait(waitSeconds, nameof(waitSeconds));
+
+            return context => Guard(context, async () =>
             {
                 var c = await Exists(context, selector, waitSeconds);
 
@@ -93,33 +124,30 @@ namespace Ozone
                 }
 
                 return context;
-            };
+            });
+        }
 
         /// <summary>
         /// Chain gate: stops an <see cref="AsyncStep"/> chain unless an element matches the CSS
         /// selector in the page or current frame, waiting up to <paramref name="waitSeconds"/> for one.
         /// </summary>
         /// <remarks>
-        /// When nothing matches, the steps after the gate are skipped and the chain's result is the
-        /// context the gate received. The context passes through unchanged when an element matches.
-        /// The chain is not modified, so it can be run again (for example by
-        /// <see cref="While(Func{Context, Task{bool}}, AsyncStep, int)"/>) and the check is repeated.
+        /// When nothing matches, the rest of the chain the gate is linked into is skipped, and the
+        /// result of <see cref="AsyncStep.Bind"/> has <see cref="AsyncStep.Stopped"/> set and the context
+        /// the gate received. The context passes through unchanged when an element matches. Inside
+        /// <see cref="While(Func{Context, Task{bool}}, AsyncStep, int)"/> a stop ends the loop.
         /// <code>
         /// ctx | (Flow.BreakIfNotExists("#next") | Flow.Find("#next") | Flow.Click)
         /// </code>
+        /// Built on <see cref="AsyncStep.BreakUnless(string, Func{Context, Task{bool}})"/>, which makes gates for other conditions.
         /// </remarks>
-        public static AsyncStep BreakIfNotExists(string selector, float waitSeconds = 1) =>
-            new(nameof(BreakIfNotExists), async context =>
-            {
-                try
-                {
-                    return await Exists(context, selector, waitSeconds) != null;
-                }
-                catch(Exception x)
-                {
-                    context.CreateProblem(x);
-                    throw; // not reached: CreateProblem always throws
-                }
-            });
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="waitSeconds"/> is negative, NaN or infinite.</exception>
+        public static AsyncStep BreakIfNotExists(string selector, float waitSeconds = 1)
+        {
+            CheckWait(waitSeconds, nameof(waitSeconds));
+
+            return AsyncStep.BreakUnless(nameof(BreakIfNotExists),
+                async context => await Exists(context, selector, waitSeconds) != null);
+        }
     }
 }

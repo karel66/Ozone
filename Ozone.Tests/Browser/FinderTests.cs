@@ -60,7 +60,8 @@ public sealed class FinderTests
 
         var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.Find("#missing")(context));
 
-        StringAssert.Contains(x.Message, "'#missing' not found");
+        StringAssert.Contains(x.Message, "Find: *** not found");
+        Assert.DoesNotContain("#missing", x.Message);
     }
 
     [TestMethod]
@@ -251,7 +252,7 @@ public sealed class FinderTests
     }
 
     [TestMethod]
-    public async Task BreakIfNotExists_InWhile_StopsEachIterationAtGate()
+    public async Task BreakIfNotExists_InWhile_EndsTheLoop()
     {
         await using var context = await TestContexts.WithHtml(Html);
         int runs = 0;
@@ -259,10 +260,33 @@ public sealed class FinderTests
             | Flow.BreakIfNotExists("#missing", waitSeconds: 0.1f)
             | Mark("never");
 
-        await Flow.While(_ => Task.FromResult(runs < 3), chain)(context);
+        await Flow.While(_ => Task.FromResult(true), chain)(context);
 
-        Assert.AreEqual(3, runs);
+        Assert.AreEqual(1, runs);
         Assert.IsFalse(context.Items.ContainsKey("trail"));
+    }
+
+    // Fails the test with TimeoutException instead of hanging if a zero wait is read as "forever".
+    static readonly TimeSpan Bound = TimeSpan.FromSeconds(5);
+
+    [TestMethod]
+    public async Task BreakIfNotExists_WithZeroWait_ChecksOnceInsteadOfWaitingForever()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+
+        await (context | (Flow.BreakIfNotExists("#missing", waitSeconds: 0) | Mark("never"))).WaitAsync(Bound);
+        await (context | (Flow.BreakIfNotExists("#list", waitSeconds: 0) | Mark("ran"))).WaitAsync(Bound);
+
+        Assert.AreEqual("ran", context.Items["trail"]);
+    }
+
+    [TestMethod]
+    public async Task Exists_WithZeroWait_ReturnsNullAtOnce()
+    {
+        await using var context = await TestContexts.WithHtml(Html);
+
+        Assert.IsNull(await Flow.Exists(context, "#missing", 0).WaitAsync(Bound));
+        Assert.IsFalse(await Flow.ExistsOnXPath(context, "//nothing", 0).WaitAsync(Bound));
     }
 
     [TestMethod]
@@ -280,7 +304,7 @@ public sealed class FinderTests
 
         var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.FindAll("#missing")(context));
 
-        StringAssert.Contains(x.Message, "FindAll: '#missing' not found");
+        StringAssert.Contains(x.Message, "FindAll: *** not found");
     }
 
     [TestMethod]
@@ -388,5 +412,55 @@ public sealed class FinderTests
         await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.RelativeFind("li")(other));
 
         Assert.IsLessThan(TimeSpan.FromSeconds(3), watch.Elapsed);
+    }
+}
+
+[TestClass]
+[TestCategory("Browser")]
+[DoNotParallelize]
+public sealed class FinderMessageRedactionTests
+{
+    [TestCleanup]
+    public void ResetSwitch() => Flow.TraceSensitiveValues = false;
+
+    [TestMethod]
+    public async Task InvalidSelector_ByDefault_FailsWithOzoneExceptionWithoutSelector()
+    {
+        await using var context = await TestContexts.WithHtml("<p>x</p>");
+
+        var find = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.Find("p[secret")(context));
+        var exists = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.Exists(context, "p[secret", 0));
+        var ifExists = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.IfExists("p[secret", waitSeconds: 0)(context));
+        await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.ExistsOnXPath(context, "//p[", 0));
+        await Assert.ThrowsExactlyAsync<OzoneException>(() => (context | (Flow.BreakIfNotExists("p[secret", 0) | Flow.Click)));
+
+        Assert.IsNotNull(find.InnerException);
+        foreach(var x in new[] { find, exists, ifExists })
+        {
+            Assert.DoesNotContain("secret", x.Message);
+        }
+    }
+
+    [TestMethod]
+    public async Task AssertAttributeValue_WhenSensitiveTracingEnabled_ShowsValues()
+    {
+        Flow.TraceSensitiveValues = true;
+        await using var context = await TestContexts.WithHtml("""<a id="l" href="/target">x</a>""");
+        var link = await Flow.Find("#l")(context);
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.AssertAttributeValue("href", "/other")(link));
+
+        Assert.AreEqual("AssertAttributeValue: expected href='/other', actual href='/target'", x.Message);
+    }
+
+    [TestMethod]
+    public async Task NotFoundMessage_WhenSensitiveTracingEnabled_ShowsSelector()
+    {
+        Flow.TraceSensitiveValues = true;
+        await using var context = await TestContexts.WithHtml("<p>x</p>");
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.Find("#missing")(context));
+
+        StringAssert.Contains(x.Message, "Find: '#missing' not found");
     }
 }

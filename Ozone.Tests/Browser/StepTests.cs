@@ -300,7 +300,7 @@ public sealed class StepTests
 
         var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.FollowLink("#l", "Next page")(context));
 
-        StringAssert.Contains(x.Message, "expected title 'Next page', actual 'Other'");
+        StringAssert.Contains(x.Message, "expected title ***, actual ***");
     }
 
     // --- Frames -----------------------------------------------------------
@@ -401,7 +401,7 @@ public sealed class StepTests
 
         var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.AssertAttributeValue("href", "/other")(link));
 
-        Assert.AreEqual("AssertAttributeValue: expected href='/other', actual href='/target'", x.Message);
+        Assert.AreEqual("AssertAttributeValue: expected href=***, actual href=***", x.Message);
     }
 
     // --- FollowLink targets -------------------------------------------------
