@@ -65,12 +65,16 @@ namespace Ozone
         /// <summary>
         /// Trigger chain of async steps by supplying inital context
         /// </summary>
+        /// <exception cref="OzoneException">A step failed or returned no context.</exception>
         public async Task<AsyncStep> Bind(Context context)
         {
+            ArgumentNullException.ThrowIfNull(context);
+
             if (_step != null)
             {
-                Flow.Log(MethodTrace());
-                _context = await _step(context);
+                string? trace = Flow.Log(MethodTrace());
+                _context = await _step(context)
+                    ?? context.CreateProblem($"{trace}: step returned no context");
             }
             else // this is empty step
             {

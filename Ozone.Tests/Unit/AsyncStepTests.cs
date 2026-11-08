@@ -77,6 +77,24 @@ public sealed class AsyncStepTests
         StringAssert.Contains(xpath, "xpath=\"//a\"");
         StringAssert.Contains(xpath, "timeoutSeconds=1");
     }
+
+    [TestMethod]
+    public async Task Bind_WhenIntermediateStepReturnsNull_FailsWithClearMessage()
+    {
+        var context = TestContexts.Detached();
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() =>
+            context | (new AsyncStep(_ => Task.FromResult<Context>(null!)) | Append("b")));
+
+        StringAssert.Contains(x.Message, "step returned no context");
+        Assert.IsFalse(context.Items.ContainsKey("trail"));
+    }
+
+    [TestMethod]
+    public async Task Bind_WithNullContext_Throws()
+    {
+        await Assert.ThrowsExactlyAsync<ArgumentNullException>(() => new AsyncStep(Append("a")).Bind(null!));
+    }
 }
 
 /// <summary>

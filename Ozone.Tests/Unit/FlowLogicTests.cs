@@ -384,7 +384,7 @@ public sealed class FlowLogicTests
         var x = await Assert.ThrowsExactlyAsync<OzoneException>(() =>
             Flow.While(_ => Task.FromResult(true), chain)(TestContexts.Detached()));
 
-        StringAssert.Contains(x.Message, "step chain returned no context");
+        StringAssert.Contains(x.Message, "step returned no context");
     }
 
     [TestMethod]

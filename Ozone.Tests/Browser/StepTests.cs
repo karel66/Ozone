@@ -218,21 +218,38 @@ public sealed class StepTests
 
     // --- FollowLink -------------------------------------------------------
 
-    /// <summary>Serves http://ozone.test/{name} as a page titled after the name; slow-* pages load slowly.</summary>
+    /// <summary>
+    /// Serves http://ozone.test/{name} (query ignored) as a page titled after the name.
+    /// slow-* pages hold back their load event with a slow image, slowdoc* pages are sent
+    /// late, and hang* pages don't finish loading before the test gives up.
+    /// </summary>
     static Task ServeTestSite(Context context) =>
         context.Page.Context.RouteAsync("http://ozone.test/**", async route =>
         {
-            string name = route.Request.Url.Split('/')[^1];
+            string name = new Uri(route.Request.Url).AbsolutePath.TrimStart('/');
 
-            if(name == "slow.png")
+            try
             {
-                await Task.Delay(500);
-                await route.FulfillAsync(new() { ContentType = "image/png", Body = "" });
-                return;
+                if(name is "slow.png" or "hang.png")
+                {
+                    await Task.Delay(name == "slow.png" ? 500 : 5000);
+                    await route.FulfillAsync(new() { ContentType = "image/png", Body = "" });
+                    return;
+                }
+
+                if(name.StartsWith("slowdoc"))
+                {
+                    await Task.Delay(500);
+                }
+            }
+            catch(Microsoft.Playwright.PlaywrightException)
+            {
+                return; // The test finished and closed the page first.
             }
 
-            // Pages named slow-* hold back their load event with a slow image.
-            string image = name.StartsWith("slow") ? "<img src='http://ozone.test/slow.png'>" : "";
+            string image = name.StartsWith("slow-") ? "<img src='http://ozone.test/slow.png'>"
+                : name.StartsWith("hang") ? "<img src='http://ozone.test/hang.png'>"
+                : "";
 
             await route.FulfillAsync(new()
             {
@@ -385,5 +402,150 @@ public sealed class StepTests
         var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.AssertAttributeValue("href", "/other")(link));
 
         Assert.AreEqual("AssertAttributeValue: expected href='/other', actual href='/target'", x.Message);
+    }
+
+    // --- FollowLink targets -------------------------------------------------
+
+    [TestMethod]
+    public async Task FollowLink_WithTargetNamingAnIframe_ContinuesInThatIframe()
+    {
+        await using var context = await TestContexts.WithHtml(
+            """<title>start</title><iframe name="content"></iframe><a id="l" href="http://ozone.test/inframe" target="content">next</a>""");
+        await ServeTestSite(context);
+
+        var target = await Flow.FollowLink("#l", "inframe")(context);
+
+        Assert.AreSame(context.Page, target.Page);
+        Assert.IsNotNull(target.Frame);
+        Assert.AreEqual("arrived at inframe", await (await Flow.Find("#p")(target)).TextAsync());
+        Assert.AreEqual("start", await context.Title());
+    }
+
+    [TestMethod]
+    public async Task FollowLink_WithTargetNamingAnOpenWindow_ReusesThatWindow()
+    {
+        await using var context = await TestContexts.WithHtml("""
+            <title>start</title>
+            <a id="first" href="http://ozone.test/first" target="help">first</a>
+            <a id="second" href="http://ozone.test/second" target="help">second</a>
+            """);
+        await ServeTestSite(context);
+
+        var first = await Flow.FollowLink("#first", "first")(context);
+        var second = await Flow.FollowLink("#second", "second")(context);
+
+        Assert.AreNotSame(context.Page, first.Page);
+        Assert.AreSame(first.Page, second.Page);
+        Assert.IsNull(second.Frame);
+    }
+
+    [TestMethod]
+    public async Task FollowLink_WithoutTargetInsideFrame_ContinuesInThatFrame()
+    {
+        await using var context = await TestContexts.WithHtml(
+            """<title>start</title><iframe id="f" srcdoc="<a id='l' href='http://ozone.test/framed'>next</a>"></iframe>""");
+        await ServeTestSite(context);
+        var inFrame = await Flow.EnterFrame("#f")(context);
+
+        var target = await Flow.FollowLink("#l", "framed")(inFrame);
+
+        Assert.AreSame(inFrame.Frame, target.Frame);
+        Assert.AreEqual("arrived at framed", await (await Flow.Find("#p")(target)).TextAsync());
+        Assert.AreEqual("start", await context.Title());
+    }
+
+    [TestMethod]
+    public async Task FollowLink_WithParentTargetFromNestedFrame_ContinuesInParentFrame()
+    {
+        await using var context = await TestContexts.WithHtml("""
+            <title>start</title>
+            <iframe id="outer" srcdoc="<iframe id='inner' srcdoc=&quot;<a id='l' href='http://ozone.test/parent' target='_parent'>up</a>&quot;></iframe>"></iframe>
+            """);
+        await ServeTestSite(context);
+        var outer = await Flow.EnterFrame("#outer")(context);
+        var inner = await Flow.EnterFrame("#inner")(outer);
+
+        var target = await Flow.FollowLink("#l", "parent")(inner);
+
+        Assert.AreSame(outer.Frame, target.Frame);
+        Assert.AreEqual("arrived at parent", await (await Flow.Find("#p")(target)).TextAsync());
+        Assert.AreEqual("start", await context.Title());
+    }
+
+    [TestMethod]
+    public async Task FollowLink_OnButtonWithBaseTargetBlank_StaysInPage()
+    {
+        await using var context = await TestContexts.WithHtml(
+            """<base target="_blank"><button id="b" type="button" onclick="document.title='Done'">go</button>""");
+
+        var target = await Flow.FollowLink("#b", "Done")(context);
+
+        Assert.AreSame(context.Page, target.Page);
+    }
+
+    [TestMethod]
+    public async Task FollowLink_OnSubmitButtonOfFormWithTargetBlank_ContinuesInNewWindow()
+    {
+        await using var context = await TestContexts.WithHtml(
+            """<title>start</title><form action="http://ozone.test/formed" target="_blank"><button id="b">go</button></form>""");
+        await ServeTestSite(context);
+
+        var target = await Flow.FollowLink("#b", "formed")(context);
+
+        Assert.AreNotSame(context.Page, target.Page);
+        Assert.AreEqual("start", await context.Title());
+    }
+
+    [TestMethod]
+    public async Task FollowLink_WhenSameTitledPageResponseIsSlow_WaitsForNewDocument()
+    {
+        await using var context = await TestContexts.WithHtml(
+            """<title>slowdoc</title><a id="l" href="http://ozone.test/slowdoc">next</a>""");
+        await ServeTestSite(context);
+
+        var target = await Flow.FollowLink("#l", "slowdoc")(context);
+
+        Assert.AreEqual("http://ozone.test/slowdoc", target.Page.Url);
+        Assert.AreEqual("arrived at slowdoc", await (await Flow.Find("#p")(target)).TextAsync());
+    }
+
+    [TestMethod]
+    [DataRow("", DisplayName = "same window")]
+    [DataRow(" target=\"_blank\"", DisplayName = "new window")]
+    public async Task FollowLink_OnSvgLink_Navigates(string targetAttribute)
+    {
+        await using var context = await TestContexts.WithHtml(
+            $"""<title>start</title><svg width="200" height="50"><a id="l" href="http://ozone.test/svg"{targetAttribute}><text x="5" y="30">go</text></a></svg>""");
+        await ServeTestSite(context);
+
+        var target = await Flow.FollowLink("#l", "svg")(context);
+
+        Assert.AreEqual("arrived at svg", await (await Flow.Find("#p")(target)).TextAsync());
+        Assert.AreEqual(targetAttribute.Length == 0, ReferenceEquals(context.Page, target.Page));
+    }
+
+    [TestMethod]
+    public async Task FollowLink_WhenNoWindowOpens_FailsWithStepPrefix()
+    {
+        await using var context = await TestContexts.WithHtml(
+            """<a id="l" href="http://ozone.test/never" target="_blank" onclick="event.preventDefault()">next</a>""");
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.FollowLink("#l", "never")(context));
+
+        StringAssert.StartsWith(x.Message, "FollowLink: link with target '_blank' did not open a new window");
+        Assert.IsInstanceOfType<TimeoutException>(x.InnerException);
+    }
+
+    [TestMethod]
+    public async Task FollowLink_WhenPageNeverLoads_FailsWithStepPrefixWithinFindTimeout()
+    {
+        await using var context = await TestContexts.WithHtml("""<a id="l" href="http://ozone.test/hang">next</a>""");
+        await ServeTestSite(context);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        var x = await Assert.ThrowsExactlyAsync<OzoneException>(() => Flow.FollowLink("#l", "hang")(context));
+
+        StringAssert.StartsWith(x.Message, "FollowLink: target page did not finish loading");
+        Assert.IsLessThan(context.FindTimeout + TimeSpan.FromMilliseconds(700), watch.Elapsed);
     }
 }

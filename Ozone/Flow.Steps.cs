@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Playwright;
 
 namespace Ozone
@@ -72,9 +73,8 @@ namespace Ozone
         {
             ArgumentNullException.ThrowIfNull(step);
 
-            return While(condition,
-                async c => (await step.Bind(c)).Context ?? c.CreateProblem($"{nameof(While)}: step chain returned no context"),
-                maxIterations);
+            // Bind fails if any step in the chain returns no context, so Context is set here.
+            return While(condition, async c => (await step.Bind(c)).Context!, maxIterations);
         }
 
         /// <summary>
@@ -265,18 +265,27 @@ namespace Ozone
         }
 
         /// <summary>
-        /// Clicks the link and waits until the target page has loaded and has the expected title,
-        /// waiting up to <see cref="Context.FindTimeout"/> for each.
+        /// Clicks the link and waits until the document it navigates to has loaded and has the
+        /// expected title. All the waits together take at most <see cref="Context.FindTimeout"/>.
         /// </summary>
         /// <remarks>
-        /// When the link opens a new window, the flow continues in that window. That is the case
-        /// when the link (the found element or its enclosing <c>a</c>/<c>area</c>), or failing that the
-        /// page's <c>base</c> element, has a <c>target</c> other than <c>_self</c>, <c>_parent</c> or
-        /// <c>_top</c>. Windows opened by script (<c>window.open</c>) are not followed.
-        /// The title is checked on the top-level page, so a link followed from inside a frame
-        /// continues at the top level.
+        /// The flow continues where the link's target says the new document will open. The target
+        /// comes from the link (the found element or its enclosing <c>a</c>/<c>area</c>), or for a
+        /// submit button from its <c>formtarget</c> or its form's <c>target</c>, and failing that
+        /// from the page's <c>base</c> element. Any other element (for example a button that
+        /// navigates by script) is treated as targeting its own frame.
+        /// <list type="bullet">
+        /// <item><c>_self</c> or no target: the frame the element is in.</item>
+        /// <item><c>_parent</c>: that frame's parent; <c>_top</c>: the top-level page.</item>
+        /// <item>A name: the frame or window with that name, if one exists; otherwise a new window.</item>
+        /// <item><c>_blank</c>: a new window.</item>
+        /// </list>
+        /// Windows opened by script (<c>window.open</c>) are not followed.
         /// </remarks>
-        /// <returns>A context for the target page, without Frame, Element or Collection.</returns>
+        /// <returns>
+        /// A context for the target page, without Element or Collection. Its Frame is the target
+        /// frame, or null when the target is the page's main frame.
+        /// </returns>
         public static Func<Context, Task<Context>> FollowLink(string selector, string targetTitle) =>
             async context =>
             {
@@ -285,47 +294,202 @@ namespace Ozone
                 return await Guard(context, async () =>
                 {
                     var element = link.Element!;
-                    float timeout = (float)context.FindTimeout.TotalMilliseconds;
-                    Context target;
+                    var deadline = DateTime.UtcNow + context.FindTimeout;
+                    float Remaining() => (float)Math.Max(1, (deadline - DateTime.UtcNow).TotalMilliseconds);
 
-                    if(OpensNewWindow(await element.EvaluateAsync<string?>(LinkTargetScript)))
+                    var origin = context.Frame ?? context.Page.MainFrame;
+                    string targetName = await element.EvaluateAsync<string>(LinkTargetScript);
+                    var existing = await ResolveTarget(context, origin, targetName);
+
+                    IPage page;
+                    IFrame frame;
+
+                    if(existing is { } t)
                     {
-                        var popup = await context.Page.RunAndWaitForPopupAsync(() => element.ClickAsync(), new() { Timeout = timeout });
-                        target = context.NextPage(popup);
+                        (page, frame) = t;
+
+                        try
+                        {
+                            await ClickAndWaitForNavigation(element, page, frame, Remaining);
+                        }
+                        catch(TimeoutException x)
+                        {
+                            return FollowLinkProblem(context, "could not click the link", x);
+                        }
                     }
                     else
                     {
-                        // Click waits for a navigation it starts to begin; this waits for it to finish.
-                        await element.ClickAsync();
-                        target = context.NextPage(context.Page);
+                        try
+                        {
+                            page = await context.Page.RunAndWaitForPopupAsync(() => element.ClickAsync(), new() { Timeout = Remaining() });
+                        }
+                        catch(TimeoutException x)
+                        {
+                            return FollowLinkProblem(context, $"link with target '{targetName}' did not open a new window", x);
+                        }
+
+                        frame = page.MainFrame;
                     }
 
-                    await target.Page.WaitForLoadStateAsync(LoadState.Load, new() { Timeout = timeout });
+                    var target = context.NextPage(page).NextFrame(frame == page.MainFrame ? null : frame);
 
                     try
                     {
-                        await Assertions.Expect(target.Page).ToHaveTitleAsync(targetTitle, new() { Timeout = timeout });
+                        await frame.WaitForLoadStateAsync(LoadState.Load, new() { Timeout = Remaining() });
                     }
-                    catch(PlaywrightException)
+                    catch(TimeoutException x)
                     {
-                        return target.CreateProblem($"{nameof(FollowLink)}: expected title '{targetTitle}', actual '{await target.Page.TitleAsync()}'");
+                        return FollowLinkProblem(target, "target page did not finish loading", x);
+                    }
+
+                    try
+                    {
+                        await frame.WaitForFunctionAsync(TitleMatchesScript, targetTitle, new() { Timeout = Remaining() });
+                    }
+                    catch(Exception x) when(x is TimeoutException or PlaywrightException)
+                    {
+                        return target.CreateProblem($"{nameof(FollowLink)}: expected title '{targetTitle}', actual '{await frame.TitleAsync()}'");
                     }
 
                     return target;
                 });
             };
 
-        /// <summary>
-        /// Returns the browsing-context target of the element's link, or of the document's base element.
-        /// </summary>
-        const string LinkTargetScript =
-            "e => e.closest('a, area')?.target || document.querySelector('base[target]')?.target || null";
+        [DoesNotReturn]
+        static Context FollowLinkProblem(Context context, string message, Exception x)
+        {
+            message = $"{nameof(FollowLink)}: {message}";
+            Log($"Problem created: {message}");
+            return context.CreateProblem(new OzoneException(message, x));
+        }
 
-        static bool OpensNewWindow(string? target) =>
-            !string.IsNullOrEmpty(target)
-            && !target.Equals("_self", StringComparison.OrdinalIgnoreCase)
-            && !target.Equals("_parent", StringComparison.OrdinalIgnoreCase)
-            && !target.Equals("_top", StringComparison.OrdinalIgnoreCase);
+        /// <summary>
+        /// Clicks the element and, if that starts a navigation of the frame, waits until the
+        /// frame has committed the new document, so later waits do not see the old one.
+        /// </summary>
+        static async Task ClickAndWaitForNavigation(ILocator element, IPage page, IFrame frame, Func<float> remaining)
+        {
+            var committed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            bool started = false;
+
+            void OnRequest(object? _, IRequest r)
+            {
+                if(r.IsNavigationRequest && r.Frame == frame) started = true;
+            }
+
+            void OnFailed(object? _, IRequest r)
+            {
+                if(r.IsNavigationRequest && r.Frame == frame) committed.TrySetException(
+                    new OzoneException($"{nameof(FollowLink)}: navigation to {r.Url} failed: {r.Failure}"));
+            }
+
+            void OnNavigated(object? _, IFrame f)
+            {
+                if(f == frame) committed.TrySetResult();
+            }
+
+            page.Request += OnRequest;
+            page.RequestFailed += OnFailed;
+            page.FrameNavigated += OnNavigated;
+
+            try
+            {
+                await element.ClickAsync(new() { Timeout = remaining() });
+
+                if(started)
+                {
+                    var finished = await Task.WhenAny(committed.Task, Task.Delay(TimeSpan.FromMilliseconds(remaining())));
+
+                    if(finished != committed.Task)
+                    {
+                        throw new OzoneException($"{nameof(FollowLink)}: navigation did not complete in time");
+                    }
+
+                    await committed.Task;
+                }
+            }
+            finally
+            {
+                page.Request -= OnRequest;
+                page.RequestFailed -= OnFailed;
+                page.FrameNavigated -= OnNavigated;
+            }
+        }
+
+        /// <summary>
+        /// Finds the frame a click with the given target navigates, or null if it opens a new window.
+        /// </summary>
+        static async Task<(IPage Page, IFrame Frame)?> ResolveTarget(Context context, IFrame origin, string target)
+        {
+            if(target.Length == 0 || target.Equals("_self", StringComparison.OrdinalIgnoreCase))
+            {
+                return (context.Page, origin);
+            }
+
+            if(target.Equals("_parent", StringComparison.OrdinalIgnoreCase))
+            {
+                return (context.Page, origin.ParentFrame ?? origin);
+            }
+
+            if(target.Equals("_top", StringComparison.OrdinalIgnoreCase))
+            {
+                return (context.Page, context.Page.MainFrame);
+            }
+
+            if(target.Equals("_blank", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            // A named target: an existing frame or window with that name, searching this page first.
+            var pages = context.Page.Context.Pages.Where(p => p != context.Page && !p.IsClosed).Prepend(context.Page);
+
+            foreach(var page in pages)
+            {
+                foreach(var frame in page.Frames)
+                {
+                    try
+                    {
+                        if(await frame.EvaluateAsync<string>("() => window.name") == target)
+                        {
+                            return (page, frame);
+                        }
+                    }
+                    catch(PlaywrightException)
+                    {
+                        // Frame detached or navigating; it can't be the target.
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Returns the target of the element's link, or of the submit button's form, falling back
+        /// to the document's base element; an empty string means the element's own frame.
+        /// Uses getAttribute so SVG links (whose <c>target</c> property is not a string) work too.
+        /// </summary>
+        const string LinkTargetScript = """
+            e => {
+                const base = () => document.querySelector('base[target]')?.getAttribute('target') || '';
+                const link = e.closest('a, area');
+                if (link) {
+                    return link.hasAttribute('href') ? (link.getAttribute('target') || base()) : '';
+                }
+                const button = e.closest('button, input');
+                if (button && button.form && (button.type === 'submit' || button.type === 'image')) {
+                    return button.getAttribute('formtarget') || button.form.getAttribute('target') || base();
+                }
+                return '';
+            }
+            """;
+
+        /// <summary>
+        /// True when the document title equals the expected title, ignoring surrounding and repeated whitespace.
+        /// </summary>
+        const string TitleMatchesScript =
+            "t => document.title.replace(/\\s+/g, ' ').trim() === t.replace(/\\s+/g, ' ').trim()";
 
         /// <summary>
         /// Finds the <c>iframe</c> (or <c>frame</c>) element by CSS selector and continues inside it:
